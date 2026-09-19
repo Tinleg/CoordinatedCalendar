@@ -16,7 +16,7 @@ struct CalendarFlowView: View {
                 contributorsColumn
                     .frame(minWidth: 240, maxWidth: .infinity)
                 hubColumn
-                    .frame(width: 230)
+                    .frame(width: 260)
                     .frame(maxHeight: .infinity)
                 recipientsColumn
                     .frame(minWidth: 300, maxWidth: .infinity)
@@ -87,6 +87,8 @@ struct CalendarFlowView: View {
             .background(.background, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5))
             .anchorPreference(key: FlowAnchorKey.self, value: .bounds) { ["hub": $0] }
+            // Fan-out options live under the hub so the recipient list lines up with the contributors.
+            busyBlockOptions
             Spacer(minLength: 0)
         }
     }
@@ -97,9 +99,8 @@ struct CalendarFlowView: View {
                 "Fan-Out",
                 systemImage: "arrow.up.left.and.arrow.down.right",
                 color: Self.fanOutColor,
-                detail: "Checked calendars receive a busy block for every consolidated event, except those that came from them. Blocks carry only the title below, times, free/busy status and a hashed marker."
+                detail: "Checked calendars receive a busy block for every consolidated event, except those that came from them. Blocks carry only the busy block title (set in the middle), times, free/busy status and a hashed marker."
             )
-            busyBlockOptions
             ForEach(viewModel.calendars.filter { $0.allowsContentModifications && $0.stableKey != viewModel.consolidatedCalendarKey }) { calendar in
                 calendarRow(
                     calendar,
@@ -115,8 +116,13 @@ struct CalendarFlowView: View {
 
     private var busyBlockOptions: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Busy block title")
+            Label("Busy blocks", systemImage: "rectangle.badge.checkmark")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Self.fanOutColor)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Title")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 TextField(FreeBusyCompliance.fanOutTitle, text: Binding(
                     get: { viewModel.fanOutTitle },
                     set: { viewModel.setFanOutTitle($0) }
