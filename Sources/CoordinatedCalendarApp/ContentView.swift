@@ -22,8 +22,7 @@ struct ContentView: View {
 
     enum Page: String, CaseIterable, Identifiable {
         case status = "Status"
-        case fanIn = "Fan-In"
-        case fanOut = "Fan-Out"
+        case calendars = "Calendars"
         case schedule = "Schedule"
         case run = "Preview & Run"
         case manualCopy = "Manual Copy"
@@ -33,8 +32,7 @@ struct ContentView: View {
         var systemImage: String {
             switch self {
             case .status: "heart.text.square"
-            case .fanIn: "arrow.down.right.and.arrow.up.left"
-            case .fanOut: "arrow.up.left.and.arrow.down.right"
+            case .calendars: "point.3.connected.trianglepath.dotted"
             case .schedule: "clock"
             case .run: "play.rectangle"
             case .manualCopy: "doc.on.doc"
@@ -44,8 +42,7 @@ struct ContentView: View {
         var summary: String {
             switch self {
             case .status: "Calendar access, background sync and health."
-            case .fanIn: "Gather every event, with full details, into one consolidated calendar."
-            case .fanOut: "Send sanitized busy blocks from the consolidated calendar to your other calendars."
+            case .calendars: "Gather events into the consolidated calendar (fan-in) and send sanitized busy blocks back out (fan-out)."
             case .schedule: "How often the background sync runs, and which dates it covers."
             case .run: "Preview or run the consolidated sync now, and inspect every planned change."
             case .manualCopy: "Copy events once from one calendar to another."
@@ -154,10 +151,8 @@ struct ContentView: View {
                     uninstallSection
                 }
             }
-        case .fanIn:
-            fanInSection
-        case .fanOut:
-            fanOutSection
+        case .calendars:
+            CalendarFlowView(viewModel: viewModel)
         case .schedule:
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -456,91 +451,6 @@ struct ContentView: View {
                 DatePicker("End", selection: binding(\.endDate), displayedComponents: [.date, .hourAndMinute])
             }
         }
-    }
-
-    private var fanInSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                Picker("Consolidated calendar", selection: consolidatedSelection) {
-                    Text("Choose calendar").tag(Optional<String>.none)
-                    ForEach(viewModel.calendars.filter(\.allowsContentModifications)) { calendar in
-                        Text(calendar.displayName).tag(Optional(calendar.stableKey))
-                    }
-                }
-                Text("Create a calendar for this in the Calendar app (File > New Calendar). It keeps full, readable details of every gathered event, so host it in an account where that is acceptable.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                Text("Contributors")
-                    .font(.headline)
-                Text("Events from these calendars copy into the consolidated calendar as Calendar: Title, with location, notes, attendees and free/busy status. Read-only calendars such as holidays and birthdays can contribute.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                calendarChecklist(
-                    calendars: viewModel.calendars.filter { $0.stableKey != viewModel.consolidatedCalendarKey },
-                    selectedKeys: viewModel.contributorCalendarKeys,
-                    availability: nil,
-                    availabilityOptions: nil,
-                    setAvailability: nil,
-                    set: viewModel.setContributor
-                )
-            }
-            .padding(6)
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
-    }
-
-    private var fanOutSection: some View {
-        GroupBox {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Busy block title")
-                    TextField(FreeBusyCompliance.fanOutTitle, text: Binding(
-                        get: { viewModel.fanOutTitle },
-                        set: { viewModel.setFanOutTitle($0) }
-                    ))
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 260)
-                }
-                Text("The only text a busy block carries. Leave it blank for \"\(FreeBusyCompliance.fanOutTitle)\". Changing it retitles every existing busy block on the next sync.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Toggle("Skip events marked Free", isOn: Binding(
-                    get: { viewModel.skipFreeEvents },
-                    set: { viewModel.setSkipFreeEvents($0) }
-                ))
-                Toggle("Skip meetings you declined", isOn: Binding(
-                    get: { viewModel.skipDeclinedEvents },
-                    set: { viewModel.setSkipDeclinedEvents($0) }
-                ))
-                Text("Skipped events don't block time elsewhere. Busy blocks already created for them are removed on the next sync.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Divider()
-
-                Text("Recipients")
-                    .font(.headline)
-                Text("Each checked calendar receives a busy block for every consolidated event, except those that came from it. Blocks carry only the title above, times, free/busy status and a hashed marker. Availability lists only the statuses each calendar supports.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                calendarChecklist(
-                    calendars: viewModel.calendars.filter {
-                        $0.allowsContentModifications && $0.stableKey != viewModel.consolidatedCalendarKey
-                    },
-                    selectedKeys: viewModel.recipientCalendarKeys,
-                    availability: viewModel.recipientAvailability,
-                    availabilityOptions: viewModel.recipientAvailabilityOptions,
-                    setAvailability: viewModel.setRecipientAvailability,
-                    set: viewModel.setRecipient
-                )
-            }
-            .padding(6)
-        }
-        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var scheduleSection: some View {
@@ -869,56 +779,6 @@ struct ContentView: View {
             get: { viewModel.mode },
             set: { viewModel.setMode($0) }
         )
-    }
-
-    private func calendarChecklist(
-        calendars: [CalendarIdentity],
-        selectedKeys: Set<String>,
-        availability: ((String) -> DestinationAvailability)?,
-        availabilityOptions: ((String) -> [DestinationAvailability])?,
-        setAvailability: ((DestinationAvailability, String) -> Void)?,
-        set: @escaping (String, Bool) -> Void
-    ) -> some View {
-        List(calendars) { calendar in
-            HStack {
-                Toggle(isOn: Binding(
-                    get: { selectedKeys.contains(calendar.stableKey) },
-                    set: { set(calendar.stableKey, $0) }
-                )) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(calendar.displayName)
-                        Text(calendarCapabilities(calendar))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .toggleStyle(.checkbox)
-
-                Spacer()
-
-                if let availability, let availabilityOptions, let setAvailability {
-                    Picker("Availability", selection: Binding(
-                        get: { availability(calendar.stableKey) },
-                        set: { setAvailability($0, calendar.stableKey) }
-                    )) {
-                        ForEach(availabilityOptions(calendar.stableKey), id: \.self) { option in
-                            Text(option.displayName).tag(option)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 130)
-                    .disabled(!selectedKeys.contains(calendar.stableKey))
-                }
-            }
-            .padding(.vertical, 2)
-        }
-        .frame(minHeight: 180, maxHeight: .infinity)
-    }
-
-    private func calendarCapabilities(_ calendar: CalendarIdentity) -> String {
-        let access = calendar.allowsContentModifications ? "writable" : "read-only"
-        let statuses = calendar.supportedAvailabilities.map(\.capitalized).joined(separator: ", ")
-        return [calendar.sourceType, access, statuses.isEmpty ? nil : statuses].compactMap { $0 }.joined(separator: " · ")
     }
 
     private var scheduleOptions: [(label: String, seconds: Int)] {

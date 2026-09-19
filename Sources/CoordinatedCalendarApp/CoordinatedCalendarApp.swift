@@ -7,7 +7,7 @@ struct CoordinatedCalendarApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)
-                .frame(minWidth: 860, minHeight: 620)
+                .frame(minWidth: 1080, minHeight: 660)
         }
         .windowStyle(.titleBar)
         .commands {

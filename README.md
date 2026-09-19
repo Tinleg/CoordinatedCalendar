@@ -25,11 +25,13 @@ To do that, it gathers every event into one consolidated calendar you choose, wh
 
 These use the app's demo mode (`-demoMode YES`), which shows sample calendars and never reads or writes anything.
 
-| Status | Fan-Out |
+The **Calendars** page shows fan-in and fan-out side by side: checked contributors on the left curve into the consolidated calendar in the middle, which fans out to the checked recipients on the right.
+
+![Calendars page: contributors on the left flow into the consolidated calendar, which flows out to recipient calendars on the right](Docs/images/calendars.png)
+
+| Status | Preview & Run |
 |---|---|
-| ![Status page: calendar access, background sync health, setup summary and uninstall](Docs/images/status.png) | ![Fan-Out page: busy block title, skip options and recipient calendars](Docs/images/fan-out.png) |
-| **Fan-In** | **Preview & Run** |
-| ![Fan-In page: consolidated calendar and contributor calendars](Docs/images/fan-in.png) | ![Preview & Run page: planned creates, updates and skips](Docs/images/preview-run.png) |
+| ![Status page: calendar access, background sync health, job details, setup summary and uninstall](Docs/images/status.png) | ![Preview & Run page: planned creates, updates and skips](Docs/images/preview-run.png) |
 
 ## Requirements
 
@@ -57,8 +59,10 @@ The first time the app reads your calendars, macOS asks for Calendar access: cho
 1. **Create a consolidation calendar.** In the Calendar app, add a new calendar under any account, for example **File > New Calendar**, named `Consolidated`. Any writable account works. iCloud is a good choice because the full consolidated view then syncs to all your Apple devices, but the calendar holds full meeting details from every account, so pick an account where that is acceptable (see [What the consolidated calendar holds](#what-the-consolidated-calendar-holds)). Reserve it for CoordinatedCalendar: events you add to it directly are treated as your own and fan out as busy blocks too.
 2. **Install CoordinatedCalendar.** Run `./scripts/verify-on-mac.sh`, then open `~/Applications/CoordinatedCalendar.app` and click **Grant Access** to give it full Calendar access.
 3. **Set up the pages in the sidebar.**
-   - **Fan-In:** choose the **Consolidated calendar** you just created, then check the **Contributors**: every calendar whose events should be gathered.
-   - **Fan-Out:** set the **Busy block title** (default `Busy - Other`), and choose whether to skip events marked Free and meetings you declined (both on by default). Then check the **Recipients**: every calendar that should receive busy blocks, usually the same writable calendars. For each one, the **Availability** picker keeps the source status (**Leave As-Is**) or forces Free, Busy or Tentative, limited to what that calendar supports. Each calendar's row shows its account type and supported statuses.
+   - **Calendars:** in the middle, choose the **Consolidated** calendar you just created.
+     - On the left (**Fan-In**), check every calendar whose events should be gathered.
+     - On the right (**Fan-Out**), set the **Busy block title** (default `Busy - Other`), and choose whether to skip events marked Free and meetings you declined (both on by default). Then check every calendar that should receive busy blocks, usually the same writable calendars. For each one, the availability picker keeps the source status (**Leave As-Is**) or forces Free, Busy or Tentative, limited to what that calendar supports.
+     - Each calendar's row shows its account type, whether it's writable, and the statuses it supports. Curves show where events flow.
    - **Schedule:** choose how often the background sync runs, and the **Date Window** to keep in sync.
 4. **Preview first.** On **Preview & Run**, click **Preview Sync** and check the planned copies before anything is written.
 5. **Click Submit Background Jobs** on the **Status** page. This installs the scheduled sync and the health check (see [Automatic Runs](#automatic-runs)). From then on, fan-in and fan-out run every few minutes without the app open.

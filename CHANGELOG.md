@@ -9,6 +9,6 @@ First public release.
 - Adapts each copy to what its destination supports (for example Tentative on Exchange, Free/Busy on iCloud), keeping the intended status in the marker.
 - Runs on several Macs without duplicating copies, and removes duplicates if two Macs race.
 - One background job (fan-in, then fan-out), plus a health check that notifies you when syncing stops or fails. The Status page shows each job's schedule, command, launchd state, last result and logs.
-- Paged interface: Status, Fan-In, Fan-Out, Schedule, Preview & Run and Manual Copy.
+- Paged interface: Status, Calendars (fan-in and fan-out side by side, with curves from contributors through the consolidated calendar to recipients), Schedule, Preview & Run and Manual Copy.
 - Uninstall with **Remove Everything**, or `--remove-all-copies`, which removes only what the app created.
 - No API connections of its own: works through the accounts in macOS Calendar.
