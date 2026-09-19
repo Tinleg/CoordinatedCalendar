@@ -6,6 +6,11 @@ import SwiftUI
 /// and from it out to each checked recipient.
 struct CalendarFlowView: View {
     @ObservedObject var viewModel: BridgeViewModel
+    /// Height of the taller column header, so the consolidated card centers on the calendar rows alone.
+    @State private var headerHeight: CGFloat = 0
+    /// Bottom of the busy-block options and height of the columns, to add scroll room where they overhang.
+    @State private var optionsBottom: CGFloat = 0
+    @State private var columnsHeight: CGFloat = 0
 
     private static let fanInColor = Color.blue
     private static let fanOutColor = Color.orange
@@ -17,11 +22,22 @@ struct CalendarFlowView: View {
                     .frame(minWidth: 240, maxWidth: .infinity)
                 hubColumn
                     .frame(width: 260)
+                    // Rows start below the column headers (plus the column's 8-point spacing).
+                    .padding(.top, headerHeight + 8)
                     .frame(maxHeight: .infinity)
                 recipientsColumn
                     .frame(minWidth: 300, maxWidth: .infinity)
             }
+            .coordinateSpace(name: "flow")
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: ColumnsHeightKey.self, value: proxy.size.height)
+            })
+            // Scroll room for the busy-block options where they hang below the columns' end.
+            .padding(.bottom, max(0, optionsBottom - columnsHeight))
             .padding(.vertical, 6)
+            .onPreferenceChange(HeaderHeightKey.self) { headerHeight = $0 }
+            .onPreferenceChange(OptionsOverhangKey.self) { optionsBottom = $0 }
+            .onPreferenceChange(ColumnsHeightKey.self) { columnsHeight = $0 }
             .backgroundPreferenceValue(FlowAnchorKey.self) { anchors in
                 GeometryReader { proxy in
                     flowLines(anchors: anchors, proxy: proxy)
@@ -87,8 +103,15 @@ struct CalendarFlowView: View {
             .background(.background, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5))
             .anchorPreference(key: FlowAnchorKey.self, value: .bounds) { ["hub": $0] }
-            // Fan-out options live under the hub so the recipient list lines up with the contributors.
-            busyBlockOptions
+            // The fan-out options hang 12 points below the card without affecting layout, so the card alone
+            // is centered between the tops and bottoms of the calendar lists.
+            .overlay(alignment: .bottom) {
+                busyBlockOptions
+                    .alignmentGuide(.bottom) { dimensions in dimensions[.top] - 12 }
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: OptionsOverhangKey.self, value: proxy.frame(in: .named("flow")).maxY)
+                    })
+            }
             Spacer(minLength: 0)
         }
     }
@@ -157,6 +180,11 @@ struct CalendarFlowView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.bottom, 4)
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: HeaderHeightKey.self, value: proxy.size.height)
+        })
+        // Both headers take the taller height, so both calendar lists start on the same line.
+        .frame(minHeight: headerHeight, alignment: .top)
     }
 
     private func calendarRow(
@@ -249,5 +277,32 @@ private struct FlowAnchorKey: PreferenceKey {
 
     static func reduce(value: inout [String: Anchor<CGRect>], nextValue: () -> [String: Anchor<CGRect>]) {
         value.merge(nextValue()) { $1 }
+    }
+}
+
+/// The tallest column header's height.
+private struct HeaderHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Bottom edge of the busy-block options in the "flow" coordinate space.
+private struct OptionsOverhangKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// Height of the three columns, before any overhang room.
+private struct ColumnsHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
