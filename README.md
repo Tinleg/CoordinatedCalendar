@@ -36,7 +36,7 @@ The **Calendars** page shows fan-in and fan-out side by side: checked contributo
 ## Requirements
 
 - macOS 14 (Sonoma) or later, on a Mac that is on and awake when you want syncing to happen.
-- The Swift 6 toolchain to build it: Xcode 16 or later, or the Xcode Command Line Tools (`xcode-select --install`).
+- The Swift 6.1 toolchain or later to build it: Xcode 16.4 or later, or the Xcode Command Line Tools (`xcode-select --install`).
 - Your calendar accounts added in **System Settings > Internet Accounts** (or in the Calendar app), so they appear in Calendar.
 
 ## Install
