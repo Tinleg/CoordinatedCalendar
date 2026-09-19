@@ -364,5 +364,9 @@ Issues and pull requests are welcome. Run `./scripts/verify-on-mac.sh` (or `swif
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT with the [Commons Clause](https://commonsclause.com/) condition. See [LICENSE](LICENSE).
+
+You may use, copy, modify and share CoordinatedCalendar for free, including for your own work: a consultant can run it on their own calendars. You may not sell it, or sell a product or service (including hosting or paid support) whose value comes entirely or substantially from it. Because of that condition, CoordinatedCalendar is source-available rather than open source in the OSI sense.
+
+Version 0.1.0 was published under the plain MIT license; later versions use MIT with the Commons Clause.
 

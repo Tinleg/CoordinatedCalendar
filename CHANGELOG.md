@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **License:** now MIT with the Commons Clause condition. It is still free to use, modify and share, but it may not be sold, or offered as a paid product or service built substantially on it. Version 0.1.0 remains available under plain MIT.
 - Calendars page: the Fan-In and Fan-Out descriptions are now hover tooltips (ⓘ), so both calendar lists start right under their headings.
 
 ## 0.1.0
