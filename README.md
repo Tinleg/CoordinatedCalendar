@@ -358,6 +358,14 @@ CoordinatedCalendar only modifies or deletes events it created itself, identifie
 
 If you use it on several Macs, remove the background jobs on each (**Remove Background Jobs** on the Status page) before removing everything, so no other Mac recreates copies.
 
+## Documentation
+
+- [Architecture](Docs/ARCHITECTURE.md): how the engine, data model, background jobs and GUI fit together.
+- [Design decisions](Docs/DESIGN-DECISIONS.md): the key choices and why they were made.
+- [Roadmap](Docs/ROADMAP.md): ideas, known limitations and open questions.
+- [Releasing](Docs/RELEASING.md): how versions and releases are made.
+- [Changelog](CHANGELOG.md)
+
 ## Contributing and Security
 
 Issues and pull requests are welcome. Run `./scripts/verify-on-mac.sh` (or `swift test`) before sending changes; the tests use only synthetic calendars. To report a security or privacy problem, see [SECURITY.md](SECURITY.md).
