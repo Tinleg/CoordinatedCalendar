@@ -70,6 +70,75 @@ enum SyncAgentInstaller {
         return ["--window-days-past", "\(past)", "--window-days-future", "\(future)"]
     }
 
+    /// What an installed LaunchAgent does, read from its plist and from launchd.
+    struct JobDetails: Identifiable, Equatable {
+        let label: String
+        let plistPath: String
+        let interval: Int
+        let runsAtLoad: Bool
+        let arguments: [String]
+        let logPath: String
+        let errorLogPath: String
+        /// launchd's view: nil when the job is installed but not loaded.
+        var state: String?
+        var runs: String?
+        var lastExitCode: String?
+
+        var id: String { label }
+        var isLoaded: Bool { state != nil }
+    }
+
+    /// Every LaunchAgent this app installed, with launchd's current state for each.
+    static func installedJobs() -> [JobDetails] {
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: launchAgentsURL, includingPropertiesForKeys: nil) else {
+            return []
+        }
+        return urls
+            .filter { $0.pathExtension == "plist" }
+            .compactMap { url -> JobDetails? in
+                guard let data = try? Data(contentsOf: url),
+                      let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                      let label = plist["Label"] as? String, label.hasPrefix(labelPrefix)
+                else { return nil }
+                var job = JobDetails(
+                    label: label,
+                    plistPath: url.path,
+                    interval: plist["StartInterval"] as? Int ?? 0,
+                    runsAtLoad: plist["RunAtLoad"] as? Bool ?? false,
+                    arguments: plist["ProgramArguments"] as? [String] ?? [],
+                    logPath: plist["StandardOutPath"] as? String ?? "",
+                    errorLogPath: plist["StandardErrorPath"] as? String ?? ""
+                )
+                let state = launchdState(label: label)
+                job.state = state["state"]
+                job.runs = state["runs"]
+                job.lastExitCode = state["last exit code"]
+                return job
+            }
+            .sorted { $0.label > $1.label }
+    }
+
+    /// Top-level `key = value` lines from `launchctl print` (state, runs, last exit code); empty if not loaded.
+    private static func launchdState(label: String) -> [String: String] {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["print", "\(service)/\(label)"]
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return [:] }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else { return [:] }
+        var values: [String: String] = [:]
+        for line in text.components(separatedBy: "\n") where line.hasPrefix("\t") && !line.hasPrefix("\t\t") {
+            let parts = line.dropFirst().components(separatedBy: " = ")
+            guard parts.count == 2, ["state", "runs", "last exit code"].contains(parts[0]), values[parts[0]] == nil else { continue }
+            values[parts[0]] = parts[1]
+        }
+        return values
+    }
+
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: launchAgentsURL.appendingPathComponent("\(syncLabel).plist").path)
     }

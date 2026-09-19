@@ -28,6 +28,7 @@ final class BridgeViewModel: ObservableObject {
     @Published var syncInterval = 300
     @Published var lastSync: SyncRunStatus?
     @Published var backgroundJobsInstalled = false
+    @Published var backgroundJobs: [SyncAgentInstaller.JobDetails] = []
     /// Set when the settings folder could not be opened; changes are disabled until the app is relaunched.
     @Published var startupError: String?
     /// `-demoMode YES` shows synthetic calendars for screenshots and never reads or writes calendars or settings.
@@ -336,6 +337,7 @@ final class BridgeViewModel: ObservableObject {
         guard !isDemo else { return }
         lastSync = SyncStatusStore.load()
         backgroundJobsInstalled = SyncAgentInstaller.isInstalled
+        backgroundJobs = SyncAgentInstaller.installedJobs()
     }
 
     func cancel() {
@@ -580,6 +582,12 @@ final class BridgeViewModel: ObservableObject {
         recipientAvailabilities = [key("demo-work", "calendar"): .preserve, key("demo-client", "calendar"): .tentative, key("demo-icloud", "personal"): .preserve]
         permissionStatus = .fullAccess
         backgroundJobsInstalled = true
+        let executable = "/Applications/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar"
+        let logs = "~/Library/Logs/io.github.tinleg.coordinatedcalendar"
+        backgroundJobs = [
+            SyncAgentInstaller.JobDetails(label: "io.github.tinleg.coordinatedcalendar.sync", plistPath: "~/Library/LaunchAgents/io.github.tinleg.coordinatedcalendar.sync.plist", interval: 300, runsAtLoad: true, arguments: [executable, "--sync-gui-settings", "--execute", "--window-days-past", "730", "--window-days-future", "1490"], logPath: logs + ".sync.log", errorLogPath: logs + ".sync.err.log", state: "not running", runs: "42", lastExitCode: "0"),
+            SyncAgentInstaller.JobDetails(label: "io.github.tinleg.coordinatedcalendar.health", plistPath: "~/Library/LaunchAgents/io.github.tinleg.coordinatedcalendar.health.plist", interval: 900, runsAtLoad: false, arguments: [executable, "--health-check", "--notify", "--max-age-minutes", "20"], logPath: logs + ".health.log", errorLogPath: logs + ".health.err.log", state: "not running", runs: "14", lastExitCode: "0")
+        ]
         mode = .consolidatedSync
 
         var summary = SyncResult()

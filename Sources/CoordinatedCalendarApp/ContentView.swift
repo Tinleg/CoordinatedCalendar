@@ -149,6 +149,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     permissionSection
                     backgroundSyncSection
+                    backgroundJobsSection
                     setupSummarySection
                     uninstallSection
                 }
@@ -602,6 +603,91 @@ struct ContentView: View {
             }
             .padding(.vertical, 4)
         }
+    }
+
+    private var backgroundJobsSection: some View {
+        GroupBox("Background Jobs") {
+            VStack(alignment: .leading, spacing: 12) {
+                if viewModel.backgroundJobs.isEmpty {
+                    Text("No background jobs are installed. Submit Background Jobs above to install the sync and health-check jobs.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(viewModel.backgroundJobs) { job in
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Image(systemName: job.isLoaded ? "circle.fill" : "circle")
+                                .foregroundStyle(job.isLoaded ? (job.lastExitCode.map { $0 == "0" } ?? true ? .green : .orange) : .secondary)
+                                .font(.caption)
+                            Text(jobTitle(job))
+                                .font(.headline)
+                            Text(job.label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        jobDetailRow("Schedule", "Every \(intervalLabel(job.interval))\(job.runsAtLoad ? ", and at login" : "")")
+                        jobDetailRow("State", jobStateText(job))
+                        jobDetailRow("Command", job.arguments.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " "))
+                        jobDetailRow("Log", job.logPath)
+                        HStack {
+                            Button("Open Log") { openLog(job.logPath) }
+                            Button("Open Error Log") { openLog(job.errorLogPath) }
+                            Button("Show Job File") { revealInFinder(job.plistPath) }
+                        }
+                        .controlSize(.small)
+                        .disabled(viewModel.isDemo)
+                    }
+                    if job.id != viewModel.backgroundJobs.last?.id {
+                        Divider()
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func jobTitle(_ job: SyncAgentInstaller.JobDetails) -> String {
+        if job.label.hasSuffix(".sync") { return "Sync" }
+        if job.label.hasSuffix(".health") { return "Health check" }
+        return job.label.components(separatedBy: ".").last?.capitalized ?? job.label
+    }
+
+    private func jobStateText(_ job: SyncAgentInstaller.JobDetails) -> String {
+        guard let state = job.state else { return "Installed but not loaded. Submit Background Jobs to load it." }
+        var parts = [state == "running" ? "Running now" : "Loaded, waiting for the next run"]
+        if let runs = job.runs { parts.append("\(runs) runs since loaded") }
+        if let code = job.lastExitCode { parts.append(code == "0" ? "last run succeeded" : "last exit code \(code)") }
+        return parts.joined(separator: "; ")
+    }
+
+    private func jobDetailRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 80, alignment: .leading)
+            Text(value)
+                .font(label == "Command" || label == "Log" ? .caption.monospaced() : .callout)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func intervalLabel(_ seconds: Int) -> String {
+        scheduleOptions.first { $0.seconds == seconds }?.label ?? (seconds % 60 == 0 ? "\(seconds / 60) min" : "\(seconds) s")
+    }
+
+    private func openLog(_ path: String) {
+        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            viewModel.statusText = "No log yet at \(path)."
+        }
+    }
+
+    private func revealInFinder(_ path: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: (path as NSString).expandingTildeInPath)])
     }
 
     private var uninstallSection: some View {
