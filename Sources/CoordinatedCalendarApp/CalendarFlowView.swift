@@ -54,8 +54,7 @@ struct CalendarFlowView: View {
                     calendar,
                     selected: viewModel.contributorCalendarKeys.contains(calendar.stableKey),
                     color: Self.fanInColor,
-                    anchorID: "in:\(calendar.stableKey)",
-                    set: { viewModel.setContributor(calendar.stableKey, enabled: $0) }
+                    anchorID: "in:\(calendar.stableKey)"
                 )
             }
         }
@@ -111,7 +110,7 @@ struct CalendarFlowView: View {
                     color: Self.fanOutColor,
                     anchorID: "out:\(calendar.stableKey)",
                     availability: calendar.stableKey,
-                    set: { viewModel.setRecipient(calendar.stableKey, enabled: $0) }
+                    isRecipient: true
                 )
             }
         }
@@ -166,10 +165,20 @@ struct CalendarFlowView: View {
         color: Color,
         anchorID: String,
         availability recipientKey: String? = nil,
-        set: @escaping @MainActor (Bool) -> Void
+        isRecipient: Bool = false
     ) -> some View {
         HStack(alignment: .center, spacing: 8) {
-            Toggle(isOn: Binding(get: { selected }, set: set)) {
+            // Calls the view model directly; a closure parameter here crashes the Swift 6.1 compiler.
+            Toggle(isOn: Binding(
+                get: { selected },
+                set: { enabled in
+                    if isRecipient {
+                        viewModel.setRecipient(calendar.stableKey, enabled: enabled)
+                    } else {
+                        viewModel.setContributor(calendar.stableKey, enabled: enabled)
+                    }
+                }
+            )) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(calendar.displayName)
                         .lineLimit(1)
