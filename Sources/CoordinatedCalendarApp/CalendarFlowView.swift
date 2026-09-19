@@ -8,9 +8,6 @@ struct CalendarFlowView: View {
     @ObservedObject var viewModel: BridgeViewModel
     /// Height of the taller column header, so the consolidated card centers on the calendar rows alone.
     @State private var headerHeight: CGFloat = 0
-    /// Bottom of the busy-block options and height of the columns, to add scroll room where they overhang.
-    @State private var optionsBottom: CGFloat = 0
-    @State private var columnsHeight: CGFloat = 0
 
     private static let fanInColor = Color.blue
     private static let fanOutColor = Color.orange
@@ -28,16 +25,9 @@ struct CalendarFlowView: View {
                 recipientsColumn
                     .frame(minWidth: 300, maxWidth: .infinity)
             }
-            .coordinateSpace(name: "flow")
-            .background(GeometryReader { proxy in
-                Color.clear.preference(key: ColumnsHeightKey.self, value: proxy.size.height)
-            })
-            // Scroll room for the busy-block options where they hang below the columns' end.
-            .padding(.bottom, max(0, optionsBottom - columnsHeight))
             .padding(.vertical, 6)
             .onPreferenceChange(HeaderHeightKey.self) { headerHeight = $0 }
-            .onPreferenceChange(OptionsOverhangKey.self) { optionsBottom = $0 }
-            .onPreferenceChange(ColumnsHeightKey.self) { columnsHeight = $0 }
+
             .backgroundPreferenceValue(FlowAnchorKey.self) { anchors in
                 GeometryReader { proxy in
                     flowLines(anchors: anchors, proxy: proxy)
@@ -87,10 +77,7 @@ struct CalendarFlowView: View {
                     }
                 }
                 .labelsHidden()
-                Text("Keeps full, readable details of every gathered event. Create it in the Calendar app (File > New Calendar), in an account where that is acceptable.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                .help("Keeps full, readable details of every gathered event. Create it in the Calendar app (File > New Calendar), in an account where that is acceptable.")
                 HStack(spacing: 12) {
                     Label("\(viewModel.contributorCalendarKeys.count) in", systemImage: "arrow.right")
                         .foregroundStyle(Self.fanInColor)
@@ -98,20 +85,13 @@ struct CalendarFlowView: View {
                         .foregroundStyle(Self.fanOutColor)
                 }
                 .font(.caption.weight(.semibold))
+                Divider()
+                busyBlockOptions
             }
             .padding(12)
             .background(.background, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1.5))
             .anchorPreference(key: FlowAnchorKey.self, value: .bounds) { ["hub": $0] }
-            // The fan-out options hang 12 points below the card without affecting layout, so the card alone
-            // is centered between the tops and bottoms of the calendar lists.
-            .overlay(alignment: .bottom) {
-                busyBlockOptions
-                    .alignmentGuide(.bottom) { dimensions in dimensions[.top] - 12 }
-                    .background(GeometryReader { proxy in
-                        Color.clear.preference(key: OptionsOverhangKey.self, value: proxy.frame(in: .named("flow")).maxY)
-                    })
-            }
             Spacer(minLength: 0)
         }
     }
@@ -122,7 +102,7 @@ struct CalendarFlowView: View {
                 "Fan-Out",
                 systemImage: "arrow.up.left.and.arrow.down.right",
                 color: Self.fanOutColor,
-                detail: "Checked calendars receive a busy block for every consolidated event, except those that came from them. Blocks carry only the busy block title (set in the middle), times, free/busy status and a hashed marker."
+                detail: "Checked calendars receive a busy block for every consolidated event, except those that came from them. Blocks carry only the busy block title (set in the Consolidated card), times, free/busy status and a hashed marker."
             )
             ForEach(viewModel.calendars.filter { $0.allowsContentModifications && $0.stableKey != viewModel.consolidatedCalendarKey }) { calendar in
                 calendarRow(
@@ -137,36 +117,29 @@ struct CalendarFlowView: View {
         }
     }
 
+    /// Fan-out settings, shown inside the consolidated card; explanations are hover tooltips.
     private var busyBlockOptions: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Busy blocks", systemImage: "rectangle.badge.checkmark")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Self.fanOutColor)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Title")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                TextField(FreeBusyCompliance.fanOutTitle, text: Binding(
-                    get: { viewModel.fanOutTitle },
-                    set: { viewModel.setFanOutTitle($0) }
-                ))
-                .textFieldStyle(.roundedBorder)
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Busy block title")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField(FreeBusyCompliance.fanOutTitle, text: Binding(
+                get: { viewModel.fanOutTitle },
+                set: { viewModel.setFanOutTitle($0) }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .help("The only text a busy block carries. Leave it blank for \"\(FreeBusyCompliance.fanOutTitle)\". Changing it retitles every existing busy block on the next sync.")
             Toggle("Skip events marked Free", isOn: Binding(
                 get: { viewModel.skipFreeEvents },
                 set: { viewModel.setSkipFreeEvents($0) }
             ))
+            .help("Events marked Free don't take up your time, so they get no busy block. Blocks already made for them are removed on the next sync.")
             Toggle("Skip meetings you declined", isOn: Binding(
                 get: { viewModel.skipDeclinedEvents },
                 set: { viewModel.setSkipDeclinedEvents($0) }
             ))
-            Text("The title is the only text a block carries; changing it retitles existing blocks. Skipped events get no block, and existing blocks for them are removed.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            .help("Meetings you declined get no busy block. Blocks already made for them are removed on the next sync.")
         }
-        .padding(10)
-        .background(Self.fanOutColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func columnHeader(_ title: String, systemImage: String, color: Color, detail: String) -> some View {
@@ -282,24 +255,6 @@ private struct FlowAnchorKey: PreferenceKey {
 
 /// The tallest column header's height.
 private struct HeaderHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// Bottom edge of the busy-block options in the "flow" coordinate space.
-private struct OptionsOverhangKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// Height of the three columns, before any overhang room.
-private struct ColumnsHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
