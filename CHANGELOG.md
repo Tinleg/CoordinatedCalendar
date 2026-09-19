@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Calendars page: the Fan-In and Fan-Out descriptions are now hover tooltips (ⓘ), so both calendar lists start right under their headings.
+
 ## 0.1.0
 
 First public release.

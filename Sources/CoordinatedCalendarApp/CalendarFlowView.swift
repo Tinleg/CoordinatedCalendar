@@ -142,15 +142,15 @@ struct CalendarFlowView: View {
     }
 
     private func columnHeader(_ title: String, systemImage: String, color: Color, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 6) {
             Label(title, systemImage: systemImage)
                 .font(.headline)
                 .foregroundStyle(color)
-            Text(detail)
+            Image(systemName: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
+        .help(detail)
         .padding(.bottom, 4)
         .background(GeometryReader { proxy in
             Color.clear.preference(key: HeaderHeightKey.self, value: proxy.size.height)
