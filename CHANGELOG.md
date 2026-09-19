@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- New app icon: a monthly desk calendar with an amber ² ("calendar squared"), replacing the C². The social preview image uses it too.
+
 ## 0.1.1
 
 - **License:** now MIT with the Commons Clause condition. It is still free to use, modify and share, but it may not be sold, or offered as a paid product or service built substantially on it. Version 0.1.0 remains available under plain MIT.

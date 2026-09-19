@@ -46,32 +46,74 @@ for icon in icons {
     tilePath.lineWidth = max(1, icon.pixels * 0.012)
     tilePath.stroke()
 
-    // A stylized "C²": a thick, round-capped arc for the C, with a rounded superscript 2 in an accent color
-    // sitting in the C's upper-right opening.
+    // "Calendar squared": a small idealized monthly desk-calendar page (header strip, binding rings, day grid
+    // with a few busy days) and a rounded superscript 2 in the accent color at its upper right.
     let size = icon.pixels
-    let center = NSPoint(x: tileRect.midX - size * 0.045, y: tileRect.midY - size * 0.01)
-    let arcRadius = size * 0.235
-    let arc = NSBezierPath()
-    arc.appendArc(withCenter: center, radius: arcRadius, startAngle: 42, endAngle: 318, clockwise: false)
-    arc.lineWidth = size * 0.115
-    arc.lineCapStyle = .round
-    NSColor.white.setStroke()
-    arc.stroke()
+    let navy = NSColor(calibratedRed: 0.05, green: 0.14, blue: 0.43, alpha: 1)
+    let headerBlue = NSColor(calibratedRed: 0.20, green: 0.47, blue: 0.95, alpha: 1)
+    let amber = NSColor(calibratedRed: 1.0, green: 0.74, blue: 0.24, alpha: 1)
+
+    let page = NSRect(x: tileRect.midX - size * 0.31, y: tileRect.midY - size * 0.30, width: size * 0.52, height: size * 0.50)
+    let pageRadius = size * 0.07
+    NSGraphicsContext.saveGraphicsState()
+    let pageShadow = NSShadow()
+    pageShadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.30)
+    pageShadow.shadowBlurRadius = size * 0.03
+    pageShadow.shadowOffset = NSSize(width: 0, height: -size * 0.012)
+    pageShadow.set()
+    NSColor.white.setFill()
+    NSBezierPath(roundedRect: page, xRadius: pageRadius, yRadius: pageRadius).fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    // Header strip across the top of the page, clipped to the page's rounded corners.
+    let headerHeight = page.height * 0.26
+    NSGraphicsContext.saveGraphicsState()
+    NSBezierPath(roundedRect: page, xRadius: pageRadius, yRadius: pageRadius).addClip()
+    headerBlue.setFill()
+    NSRect(x: page.minX, y: page.maxY - headerHeight, width: page.width, height: headerHeight).fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    // Two binding rings straddling the top edge.
+    let ringWidth = size * 0.045
+    let ringHeight = size * 0.10
+    for fraction in [0.28, 0.72] {
+        let ring = NSRect(x: page.minX + page.width * fraction - ringWidth / 2, y: page.maxY - ringHeight * 0.55, width: ringWidth, height: ringHeight)
+        navy.setFill()
+        NSBezierPath(roundedRect: ring, xRadius: ringWidth / 2, yRadius: ringWidth / 2).fill()
+    }
+
+    // Day grid: 7 columns, with a few busy days. Small sizes get a coarser grid that stays legible.
+    let columns = size >= 64 ? 7 : 3
+    let rows = size >= 64 ? 5 : 2
+    let busy: Set<Int> = size >= 64 ? [3, 9, 10, 18, 26, 31] : [1, 3]
+    let body = NSRect(x: page.minX, y: page.minY, width: page.width, height: page.height - headerHeight)
+        .insetBy(dx: page.width * 0.09, dy: page.height * 0.08)
+    let gap = body.width * (size >= 64 ? 0.035 : 0.09)
+    let cellWidth = (body.width - gap * CGFloat(columns - 1)) / CGFloat(columns)
+    let cellHeight = (body.height - gap * CGFloat(rows - 1)) / CGFloat(rows)
+    for row in 0..<rows {
+        for column in 0..<columns {
+            let index = row * columns + column
+            let cell = NSRect(
+                x: body.minX + CGFloat(column) * (cellWidth + gap),
+                y: body.maxY - CGFloat(row + 1) * cellHeight - CGFloat(row) * gap,
+                width: cellWidth,
+                height: cellHeight
+            )
+            (busy.contains(index) ? headerBlue : NSColor(calibratedWhite: 0.86, alpha: 1)).setFill()
+            let cellRadius = min(cellWidth, cellHeight) * 0.25
+            NSBezierPath(roundedRect: cell, xRadius: cellRadius, yRadius: cellRadius).fill()
+        }
+    }
 
     let baseFont = NSFont.systemFont(ofSize: size * 0.25, weight: .heavy)
     let roundedFont = baseFont.fontDescriptor.withDesign(.rounded)
         .flatMap { NSFont(descriptor: $0, size: size * 0.25) } ?? baseFont
     let superscript = "2" as NSString
-    let superscriptAttributes: [NSAttributedString.Key: Any] = [
-        .font: roundedFont,
-        .foregroundColor: NSColor(calibratedRed: 1.0, green: 0.74, blue: 0.24, alpha: 1)
-    ]
+    let superscriptAttributes: [NSAttributedString.Key: Any] = [.font: roundedFont, .foregroundColor: amber]
     let superscriptSize = superscript.size(withAttributes: superscriptAttributes)
     superscript.draw(
-        at: NSPoint(
-            x: center.x + arcRadius * 0.95,
-            y: center.y + arcRadius * 0.66 - superscriptSize.height * 0.22
-        ),
+        at: NSPoint(x: page.maxX + size * 0.025, y: page.maxY - superscriptSize.height * 0.62),
         withAttributes: superscriptAttributes
     )
 
