@@ -1,0 +1,1628 @@
+import EventKit
+import Foundation
+
+public final class CoordinatedCalendarEngine: @unchecked Sendable {
+    public typealias ProgressHandler = @Sendable (Double, String) -> Void
+
+    public let store: EKEventStore
+    private let ledger: MappingLedger
+
+    public init(store: EKEventStore = EKEventStore(), ledger: MappingLedger) {
+        self.store = store
+        self.ledger = ledger
+    }
+
+    public func requestAccess() async throws -> Bool {
+        try await store.requestFullAccessToEvents()
+    }
+
+    public func authorizationStatus() -> EKAuthorizationStatus {
+        EKEventStore.authorizationStatus(for: .event)
+    }
+
+    public func calendars() -> [CalendarIdentity] {
+        store.calendars(for: .event)
+            .map(CalendarIdentity.init(calendar:))
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+    }
+
+    public func calendar(for identityKey: String) -> EKCalendar? {
+        store.calendars(for: .event).first { CalendarIdentity(calendar: $0).stableKey == identityKey }
+    }
+
+    /// All events in the window. EventKit matches at most four years per predicate and silently drops the
+    /// rest, so this fetches in slices and drops the duplicates of events that span a slice boundary.
+    public func events(from start: Date, to end: Date, calendars: [EKCalendar]) -> [EKEvent] {
+        var seen = Set<String>()
+        var events: [EKEvent] = []
+        for slice in Self.fetchSlices(from: start, to: end) {
+            let predicate = store.predicateForEvents(withStart: slice.start, end: slice.end, calendars: calendars)
+            for event in store.events(matching: predicate) {
+                let key = "\(event.eventIdentifier ?? event.calendarItemIdentifier)|\(event.startDate.timeIntervalSince1970)"
+                if seen.insert(key).inserted {
+                    events.append(event)
+                }
+            }
+        }
+        return events
+    }
+
+    /// Consecutive windows of at most one year covering `start..<end`.
+    public static func fetchSlices(from start: Date, to end: Date) -> [(start: Date, end: Date)] {
+        let calendar = Calendar(identifier: .gregorian)
+        var slices: [(start: Date, end: Date)] = []
+        var sliceStart = start
+        while sliceStart < end {
+            let next = calendar.date(byAdding: .year, value: 1, to: sliceStart) ?? end
+            let sliceEnd = min(next, end)
+            slices.append((sliceStart, sliceEnd))
+            sliceStart = sliceEnd
+        }
+        return slices
+    }
+
+    public func validate(settings: BridgeSettings) throws -> (EKCalendar, EKCalendar) {
+        guard settings.endDate > settings.startDate else { throw BridgeError.dateWindowInvalid }
+        guard let sourceKey = settings.sourceCalendarKey else { throw BridgeError.sourceCalendarMissing }
+        guard let destinationKey = settings.destinationCalendarKey else { throw BridgeError.destinationCalendarMissing }
+        guard sourceKey != destinationKey else { throw BridgeError.sameSourceAndDestination }
+        guard let source = calendar(for: sourceKey) else { throw BridgeError.sourceCalendarMissing }
+        guard let destination = calendar(for: destinationKey) else { throw BridgeError.destinationCalendarMissing }
+        guard destination.allowsContentModifications else {
+            throw BridgeError.destinationCalendarReadOnly(CalendarIdentity(calendar: destination).displayName)
+        }
+        return (source, destination)
+    }
+
+    public func run(settings: BridgeSettings, progress: ProgressHandler? = nil) async -> SyncResult {
+        var result = SyncResult()
+
+        do {
+            let (source, destination) = try validate(settings: settings)
+            let sourceKey = CalendarIdentity(calendar: source).stableKey
+            let destinationKey = CalendarIdentity(calendar: destination).stableKey
+            let allEvents = self.events(from: settings.startDate, to: settings.endDate, calendars: [source]).sorted { $0.startDate < $1.startDate }
+            result.scanned = allEvents.count
+            // Non-blocking events are treated as absent, so deletion cleanup also removes their existing copies.
+            let events = allEvents.filter { event in
+                guard let reason = nonBlockingReason(for: event, settings: settings) else { return true }
+                result.skipped += 1
+                result.previews.append(SyncEventPreview(
+                    id: UUID().uuidString,
+                    sourceTitle: event.title ?? "Untitled",
+                    destinationTitle: nil,
+                    startDate: event.startDate,
+                    action: .skipDuplicate,
+                    message: "Skipped: \(reason)",
+                    sourceCalendarName: calendarDisplayName(for: sourceKey),
+                    destinationCalendarName: calendarDisplayName(for: destinationKey)
+                ))
+                return false
+            }
+
+            enforceCopyShape(
+                sourceCalendarKey: sourceKey,
+                destinationCalendarKey: destinationKey,
+                destinationCalendar: destination,
+                settings: settings,
+                result: &result
+            )
+
+            if settings.reconcileDeletions {
+                reconcileDeletedCopies(
+                    sourceEvents: events,
+                    sourceCalendarKey: sourceKey,
+                    destinationCalendarKey: destinationKey,
+                    settings: settings,
+                    result: &result
+                )
+            }
+
+            for (index, sourceEvent) in events.enumerated() {
+                if Task.isCancelled {
+                    break
+                }
+
+                progress?(Double(index) / Double(max(events.count, 1)), sourceEvent.title ?? "Untitled")
+                process(
+                    sourceEvent: sourceEvent,
+                    sourceCalendarKey: sourceKey,
+                    destinationCalendarKey: destinationKey,
+                    destinationCalendar: destination,
+                    settings: settings,
+                    result: &result
+                )
+            }
+
+            if !settings.dryRun {
+                try ledger.save()
+            }
+            progress?(1, "Done")
+        } catch {
+            result.failed += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: "CoordinatedCalendar",
+                destinationTitle: nil,
+                startDate: Date(),
+                action: .error,
+                message: error.localizedDescription
+            ))
+        }
+
+        return result
+    }
+
+    public func reconcileDeletedCopies(settings: BridgeSettings, progress: ProgressHandler? = nil) async -> SyncResult {
+        var result = SyncResult()
+
+        do {
+            let (source, destination) = try validate(settings: settings)
+            let sourceKey = CalendarIdentity(calendar: source).stableKey
+            let destinationKey = CalendarIdentity(calendar: destination).stableKey
+            let events = self.events(from: settings.startDate, to: settings.endDate, calendars: [source]).sorted { $0.startDate < $1.startDate }
+            result.scanned = events.count
+            progress?(0, "Reconciling deletions")
+            reconcileDeletedCopies(
+                sourceEvents: events,
+                sourceCalendarKey: sourceKey,
+                destinationCalendarKey: destinationKey,
+                settings: settings,
+                result: &result
+            )
+            if !settings.dryRun {
+                try ledger.save()
+            }
+            progress?(1, "Done")
+        } catch {
+            result.failed += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: "CoordinatedCalendar",
+                destinationTitle: nil,
+                startDate: Date(),
+                action: .error,
+                message: error.localizedDescription
+            ))
+        }
+
+        return result
+    }
+
+    public func deleteCopies(settings: BridgeSettings, progress: ProgressHandler? = nil) async -> SyncResult {
+        var result = SyncResult()
+
+        do {
+            let (source, destination) = try validate(settings: settings)
+            let sourceKey = CalendarIdentity(calendar: source).stableKey
+            let destinationKey = CalendarIdentity(calendar: destination).stableKey
+            let events = self.events(from: settings.startDate, to: settings.endDate, calendars: [source]).sorted { $0.startDate < $1.startDate }
+            result.scanned = events.count
+
+            for (index, sourceEvent) in events.enumerated() {
+                if Task.isCancelled {
+                    break
+                }
+
+                progress?(Double(index) / Double(max(events.count, 1)), sourceEvent.title ?? "Untitled")
+                deleteDestinationCopy(
+                    sourceEvent: sourceEvent,
+                    sourceCalendarKey: sourceKey,
+                    destinationCalendarKey: destinationKey,
+                    settings: settings,
+                    result: &result
+                )
+            }
+
+            if !settings.dryRun {
+                try ledger.save()
+            }
+            progress?(1, "Done")
+        } catch {
+            result.failed += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: "CoordinatedCalendar",
+                destinationTitle: nil,
+                startDate: Date(),
+                action: .error,
+                message: error.localizedDescription
+            ))
+        }
+
+        return result
+    }
+
+    /// The window "remove everything" covers: far enough back and ahead to include any copy a sync could
+    /// have made. It is fetched in one-year slices like every other window.
+    public static func removalWindow(now: Date = Date()) -> (start: Date, end: Date) {
+        let calendar = Calendar(identifier: .gregorian)
+        return (
+            calendar.date(byAdding: .year, value: -10, to: now) ?? now,
+            calendar.date(byAdding: .year, value: 10, to: now) ?? now
+        )
+    }
+
+    /// Removes every event this app created, in every writable calendar, and clears the ledger after a real
+    /// run. An event counts as created by the app only when it carries the app's notes marker or the ledger
+    /// maps it as a copy; nothing else is touched.
+    public func removeAllCopies(
+        from startDate: Date,
+        to endDate: Date,
+        dryRun: Bool,
+        progress: ProgressHandler? = nil
+    ) async -> SyncResult {
+        var result = SyncResult()
+        let calendars = store.calendars(for: .event).filter(\.allowsContentModifications)
+
+        for (index, calendar) in calendars.enumerated() {
+            if Task.isCancelled {
+                break
+            }
+            let identity = CalendarIdentity(calendar: calendar)
+            progress?(Double(index) / Double(max(calendars.count, 1)), identity.displayName)
+            var removedSeries = Set<String>()
+
+            for event in events(from: startDate, to: endDate, calendars: [calendar]) {
+                result.scanned += 1
+                let mapped = event.eventIdentifier.map {
+                    ledger.mappingForDestinationEvent(calendarKey: identity.stableKey, eventIdentifier: $0) != nil
+                } ?? false
+                guard BridgeEventMetadata.parse(from: event.notes) != nil || mapped else {
+                    continue
+                }
+                if event.hasRecurrenceRules {
+                    guard removedSeries.insert(event.calendarItemIdentifier).inserted else { continue }
+                }
+                result.deleted += 1
+                result.previews.append(SyncEventPreview(
+                    id: event.eventIdentifier ?? UUID().uuidString,
+                    sourceTitle: event.title ?? "Untitled",
+                    destinationTitle: nil,
+                    startDate: event.startDate,
+                    action: .delete,
+                    message: dryRun ? "Would remove CoordinatedCalendar copy" : "Removed CoordinatedCalendar copy",
+                    sourceCalendarName: identity.displayName,
+                    destinationCalendarName: nil
+                ))
+                guard !dryRun else {
+                    continue
+                }
+                do {
+                    try store.remove(event, span: event.hasRecurrenceRules ? .futureEvents : .thisEvent, commit: true)
+                } catch {
+                    result.failed += 1
+                    result.previews.append(SyncEventPreview(
+                        id: event.eventIdentifier ?? UUID().uuidString,
+                        sourceTitle: event.title ?? "Untitled",
+                        destinationTitle: nil,
+                        startDate: event.startDate,
+                        action: .error,
+                        message: "Removal failed: \(error.localizedDescription)",
+                        sourceCalendarName: identity.displayName,
+                        destinationCalendarName: nil
+                    ))
+                }
+            }
+        }
+
+        if !dryRun, result.failed == 0 {
+            ledger.removeAll()
+            do {
+                try ledger.save()
+            } catch {
+                result.failed += 1
+                result.previews.append(SyncEventPreview(
+                    id: UUID().uuidString,
+                    sourceTitle: "CoordinatedCalendar",
+                    destinationTitle: nil,
+                    startDate: Date(),
+                    action: .error,
+                    message: "Copies were removed, but the ledger could not be cleared: \(error.localizedDescription)"
+                ))
+            }
+        }
+        progress?(1, "Done")
+        return result
+    }
+
+    private func process(
+        sourceEvent: EKEvent,
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        destinationCalendar: EKCalendar,
+        settings: BridgeSettings,
+        result: inout SyncResult
+    ) {
+        let sourceTitle = sourceEvent.title ?? "Untitled"
+        let sourceCalendarName = calendarDisplayName(for: sourceCalendarKey)
+        let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
+        let originCalendarName = originCalendarName(forSourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey)
+        let destinationTitle = settings.transform.destinationTitle(
+            for: sourceTitle,
+            sourceCalendarName: sourceCalendarName,
+            originCalendarName: originCalendarName
+        )
+        let sourceIdentity = BridgeEventMetadata.makeSourceIdentity(
+            sourceCalendarName: sourceCalendarName,
+            sourceEventExternalIdentifier: sourceEvent.calendarItemExternalIdentifier,
+            sourceEventIdentifier: sourceEvent.eventIdentifier,
+            sourceStartDate: sourceEvent.startDate
+        )
+        let copyMode = settings.transform.copyAsFreeBusyOnly ? "freeBusy" : "details"
+        let copyID = BridgeEventMetadata.makeCopyID(
+            sourceIdentity: sourceIdentity,
+            destinationCalendarName: destinationCalendarName,
+            copyMode: copyMode
+        )
+        let transformationSummary = transformationSummary(
+            transform: settings.transform,
+            sourceTitle: sourceTitle,
+            destinationTitle: destinationTitle
+        )
+        let resultingAvailability = availabilityDisplayName(
+            eventAvailability(
+                for: settings.transform.destinationAvailability,
+                sourceEvent: sourceEvent,
+                destinationCalendar: destinationCalendar
+            )
+        )
+        let sourceAvailability = sourceAvailabilityDisplayName(for: sourceEvent)
+        let fingerprint = EventFingerprint.fingerprint(
+            event: sourceEvent,
+            sourceCalendarKey: sourceCalendarKey,
+            transform: settings.transform,
+            sourceCalendarName: sourceCalendarName,
+            originCalendarName: originCalendarName
+        )
+
+        if settings.skipBridgeCreatedSourceEvents,
+           (ledger.isBridgeCreatedDestination(calendarKey: sourceCalendarKey, eventIdentifier: sourceEvent.eventIdentifier)
+            || BridgeEventMetadata.parse(from: sourceEvent.notes) != nil) {
+            result.skipped += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: sourceTitle,
+                destinationTitle: nil,
+                startDate: sourceEvent.startDate,
+                action: .skipDuplicate,
+                message: "Skipped CoordinatedCalendar-created event",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName,
+                sourceAvailability: sourceAvailability,
+                resultingAvailability: resultingAvailability,
+                transformationSummary: transformationSummary
+            ))
+            return
+        }
+
+        if settings.skipWhenSourceOriginMatchesDestination,
+           sourceOriginMatchesDestination(sourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey, destinationCalendarKey: destinationCalendarKey) {
+            result.skipped += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: sourceTitle,
+                destinationTitle: nil,
+                startDate: sourceEvent.startDate,
+                action: .skipDuplicate,
+                message: "Skipped copy back to original calendar",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName,
+                sourceAvailability: sourceAvailability,
+                resultingAvailability: resultingAvailability,
+                transformationSummary: transformationSummary
+            ))
+            return
+        }
+
+        if let destinationEvent = findExistingCopyBySyncedMetadata(
+            copyIDs: [copyID],
+            sourceEvent: sourceEvent,
+            destinationCalendar: destinationCalendar
+        ) {
+            let metadata = metadataForCopy(
+                copyID: copyID,
+                sourceIdentity: sourceIdentity,
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName,
+                originCalendarName: originCalendarName ?? sourceCalendarName,
+                originCalendarKey: originCalendarKey(forSourceEvent: sourceEvent, fallback: sourceCalendarKey),
+                copyMode: copyMode,
+                fingerprint: fingerprint,
+                sourceEvent: sourceEvent,
+                transform: settings.transform
+            )
+            let existingMetadata = BridgeEventMetadata.parse(from: destinationEvent.notes)
+
+            if existingMetadata?.fingerprint == fingerprint, existingMetadata?.copyID == copyID {
+                result.skipped += 1
+                result.previews.append(SyncEventPreview(
+                    id: copyID,
+                    sourceTitle: sourceTitle,
+                    destinationTitle: destinationEvent.title,
+                    startDate: sourceEvent.startDate,
+                    action: .skipDuplicate,
+                    message: "Already copied on another CoordinatedCalendar host",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary
+                ))
+                if !settings.dryRun {
+                    upsertLedgerMapping(
+                        sourceEvent: sourceEvent,
+                        sourceCalendarKey: sourceCalendarKey,
+                        destinationCalendarKey: destinationCalendarKey,
+                        destinationEvent: destinationEvent,
+                        fingerprint: fingerprint,
+                        copyMode: copyMode
+                    )
+                }
+                return
+            }
+
+            if settings.updateExistingCopies {
+                result.updated += 1
+                result.previews.append(SyncEventPreview(
+                    id: copyID,
+                    sourceTitle: sourceTitle,
+                    destinationTitle: destinationTitle,
+                    startDate: sourceEvent.startDate,
+                    action: .update,
+                    message: settings.dryRun ? "Would update copy found from synced metadata" : "Updated copy found from synced metadata",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary
+                ))
+                if !settings.dryRun {
+                    apply(
+                        sourceEvent: sourceEvent,
+                        to: destinationEvent,
+                        destinationCalendar: destinationCalendar,
+                        transform: settings.transform,
+                        sourceCalendarName: sourceCalendarName,
+                        originCalendarName: originCalendarName,
+                        metadata: metadata
+                    )
+                    do {
+                        try store.save(destinationEvent, span: .thisEvent, commit: true)
+                        upsertLedgerMapping(
+                            sourceEvent: sourceEvent,
+                            sourceCalendarKey: sourceCalendarKey,
+                            destinationCalendarKey: destinationCalendarKey,
+                            destinationEvent: destinationEvent,
+                            fingerprint: fingerprint,
+                            copyMode: copyMode
+                        )
+                    } catch {
+                        result.failed += 1
+                        result.previews.append(SyncEventPreview(
+                            id: UUID().uuidString,
+                            sourceTitle: sourceTitle,
+                            destinationTitle: destinationTitle,
+                            startDate: sourceEvent.startDate,
+                            action: .error,
+                            message: "Update failed: \(error.localizedDescription)",
+                            sourceCalendarName: sourceCalendarName,
+                            destinationCalendarName: destinationCalendarName
+                        ))
+                    }
+                }
+            } else {
+                result.blocked += 1
+                result.previews.append(SyncEventPreview(
+                    id: copyID,
+                    sourceTitle: sourceTitle,
+                    destinationTitle: destinationEvent.title,
+                    startDate: sourceEvent.startDate,
+                    action: .blocked,
+                    message: BridgeError.existingCopyNeedsUpdate(sourceTitle).localizedDescription,
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary
+                ))
+            }
+            return
+        }
+
+        if let existing = ledger.mapping(
+            sourceCalendarKey: sourceCalendarKey,
+            destinationCalendarKey: destinationCalendarKey,
+            sourceEventIdentifier: sourceEvent.eventIdentifier,
+            sourceStartDate: sourceEvent.startDate
+        ) {
+            guard let destinationEvent = store.event(withIdentifier: existing.destinationEventIdentifier) else {
+                appendCreatePreview(
+                    sourceEvent: sourceEvent,
+                    destinationTitle: destinationTitle,
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary,
+                    result: &result
+                )
+                if !settings.dryRun {
+                    createCopy(
+                        sourceEvent: sourceEvent,
+                        sourceCalendarKey: sourceCalendarKey,
+                        destinationCalendarKey: destinationCalendarKey,
+                        destinationCalendar: destinationCalendar,
+                        fingerprint: fingerprint,
+                        sourceCalendarName: sourceCalendarName,
+                        originCalendarName: originCalendarName,
+                        copyID: copyID,
+                        sourceIdentity: sourceIdentity,
+                        settings: settings,
+                        result: &result
+                    )
+                }
+                return
+            }
+
+            if existing.fingerprint == fingerprint {
+                if BridgeEventMetadata.parse(from: destinationEvent.notes)?.copyID != copyID {
+                    result.updated += 1
+                    result.previews.append(SyncEventPreview(
+                        id: existing.id,
+                        sourceTitle: sourceTitle,
+                        destinationTitle: destinationTitle,
+                        startDate: sourceEvent.startDate,
+                        action: .update,
+                        message: settings.dryRun ? "Would refresh CoordinatedCalendar metadata" : "Refreshed CoordinatedCalendar metadata",
+                        sourceCalendarName: sourceCalendarName,
+                        destinationCalendarName: destinationCalendarName,
+                        sourceAvailability: sourceAvailability,
+                        resultingAvailability: resultingAvailability,
+                        transformationSummary: transformationSummary
+                    ))
+                    if !settings.dryRun {
+                        apply(
+                            sourceEvent: sourceEvent,
+                            to: destinationEvent,
+                            destinationCalendar: destinationCalendar,
+                            transform: settings.transform,
+                            sourceCalendarName: sourceCalendarName,
+                            originCalendarName: originCalendarName,
+                            metadata: metadataForCopy(
+                                copyID: copyID,
+                                sourceIdentity: sourceIdentity,
+                                sourceCalendarName: sourceCalendarName,
+                                destinationCalendarName: destinationCalendarName,
+                                originCalendarName: originCalendarName ?? sourceCalendarName,
+                                originCalendarKey: originCalendarKey(forSourceEvent: sourceEvent, fallback: sourceCalendarKey),
+                                copyMode: copyMode,
+                                fingerprint: fingerprint,
+                                sourceEvent: sourceEvent,
+                                transform: settings.transform
+                            )
+                        )
+                        do {
+                            try store.save(destinationEvent, span: .thisEvent, commit: true)
+                            var updated = existing
+                            updated.updatedAt = Date()
+                            ledger.upsert(updated)
+                        } catch {
+                            result.failed += 1
+                            result.previews.append(SyncEventPreview(
+                                id: UUID().uuidString,
+                                sourceTitle: sourceTitle,
+                                destinationTitle: destinationTitle,
+                                startDate: sourceEvent.startDate,
+                                action: .error,
+                                message: "Update failed: \(error.localizedDescription)",
+                                sourceCalendarName: sourceCalendarName,
+                                destinationCalendarName: destinationCalendarName
+                            ))
+                        }
+                    }
+                    return
+                }
+
+                result.skipped += 1
+                result.previews.append(SyncEventPreview(
+                    id: existing.id,
+                    sourceTitle: sourceTitle,
+                    destinationTitle: destinationEvent.title,
+                    startDate: sourceEvent.startDate,
+                    action: .skipDuplicate,
+                    message: "Already copied",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary
+                ))
+                return
+            }
+
+            if settings.updateExistingCopies {
+                result.updated += 1
+                result.previews.append(SyncEventPreview(
+                    id: existing.id,
+                    sourceTitle: sourceTitle,
+                    destinationTitle: destinationTitle,
+                    startDate: sourceEvent.startDate,
+                    action: .update,
+                    message: settings.dryRun ? "Would update previous copy" : "Updated previous copy",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary
+                ))
+                if !settings.dryRun {
+                    apply(
+                        sourceEvent: sourceEvent,
+                        to: destinationEvent,
+                        destinationCalendar: destinationCalendar,
+                        transform: settings.transform,
+                        sourceCalendarName: sourceCalendarName,
+                        originCalendarName: originCalendarName,
+                        metadata: metadataForCopy(
+                            copyID: copyID,
+                            sourceIdentity: sourceIdentity,
+                            sourceCalendarName: sourceCalendarName,
+                            destinationCalendarName: destinationCalendarName,
+                            originCalendarName: originCalendarName ?? sourceCalendarName,
+                            originCalendarKey: originCalendarKey(forSourceEvent: sourceEvent, fallback: sourceCalendarKey),
+                            copyMode: copyMode,
+                            fingerprint: fingerprint,
+                            sourceEvent: sourceEvent,
+                            transform: settings.transform
+                        )
+                    )
+                    do {
+                        try store.save(destinationEvent, span: .thisEvent, commit: true)
+                        var updated = existing
+                        updated.fingerprint = fingerprint
+                        updated.sourceLastModifiedDate = sourceEvent.lastModifiedDate
+                        updated.updatedAt = Date()
+                        ledger.upsert(updated)
+                    } catch {
+                        result.failed += 1
+                        result.previews.append(SyncEventPreview(
+                            id: UUID().uuidString,
+                            sourceTitle: sourceTitle,
+                            destinationTitle: destinationTitle,
+                            startDate: sourceEvent.startDate,
+                            action: .error,
+                            message: "Update failed: \(error.localizedDescription)",
+                            sourceCalendarName: sourceCalendarName,
+                            destinationCalendarName: destinationCalendarName
+                        ))
+                    }
+                }
+            } else {
+                result.blocked += 1
+                result.previews.append(SyncEventPreview(
+                    id: existing.id,
+                    sourceTitle: sourceTitle,
+                    destinationTitle: destinationEvent.title,
+                    startDate: sourceEvent.startDate,
+                    action: .blocked,
+                    message: BridgeError.existingCopyNeedsUpdate(sourceTitle).localizedDescription,
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName,
+                    sourceAvailability: sourceAvailability,
+                    resultingAvailability: resultingAvailability,
+                    transformationSummary: transformationSummary
+                ))
+            }
+            return
+        }
+
+        appendCreatePreview(
+            sourceEvent: sourceEvent,
+            destinationTitle: destinationTitle,
+            sourceCalendarName: sourceCalendarName,
+            destinationCalendarName: destinationCalendarName,
+            sourceAvailability: sourceAvailability,
+            resultingAvailability: resultingAvailability,
+            transformationSummary: transformationSummary,
+            result: &result
+        )
+        if !settings.dryRun {
+            createCopy(
+                sourceEvent: sourceEvent,
+                sourceCalendarKey: sourceCalendarKey,
+                destinationCalendarKey: destinationCalendarKey,
+                destinationCalendar: destinationCalendar,
+                fingerprint: fingerprint,
+                sourceCalendarName: sourceCalendarName,
+                originCalendarName: originCalendarName,
+                copyID: copyID,
+                sourceIdentity: sourceIdentity,
+                settings: settings,
+                result: &result
+            )
+        }
+    }
+
+    /// Cleans up this route's existing copies before the sync: removes duplicate copies of the same source
+    /// event (which two Macs can create before their calendars sync), removes recurring copies so the sync
+    /// recreates them as single occurrences, and strips free/busy copies down to what FreeBusyCompliance
+    /// allows. Only events carrying this route's CoordinatedCalendar marker are touched.
+    private func enforceCopyShape(
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        destinationCalendar: EKCalendar,
+        settings: BridgeSettings,
+        result: inout SyncResult
+    ) {
+        let sourceCalendarName = calendarDisplayName(for: sourceCalendarKey)
+        let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
+        let freeBusy = settings.transform.copyAsFreeBusyOnly
+        let copyMode = freeBusy ? "freeBusy" : "details"
+        let expectedTitle = settings.transform.includeOriginCalendarInFreeBusyTitle
+            ? nil
+            : settings.transform.destinationTitle(for: "")
+        var removedSeries = Set<String>()
+        let routeCopies: [(event: EKEvent, metadata: BridgeEventMetadata)] = events(
+            from: settings.startDate,
+            to: settings.endDate,
+            calendars: [destinationCalendar]
+        )
+        .sorted(by: { $0.startDate < $1.startDate })
+        .compactMap { event in
+            guard let metadata = BridgeEventMetadata.parse(from: event.notes),
+                  metadata.copyMode == copyMode,
+                  BridgeEventMetadata.storedName(metadata.sourceCalendarName, matches: sourceCalendarName),
+                  BridgeEventMetadata.storedName(metadata.destinationCalendarName, matches: destinationCalendarName)
+            else {
+                return nil
+            }
+            return (event, metadata)
+        }
+
+        let duplicates = Self.duplicateCopies(in: routeCopies.filter { !$0.event.hasRecurrenceRules }.map { copy in
+            DuplicateCandidate(
+                copyID: copy.metadata.copyID,
+                creationDate: copy.event.creationDate,
+                externalIdentifier: copy.event.calendarItemExternalIdentifier,
+                eventIdentifier: copy.event.eventIdentifier ?? copy.event.calendarItemIdentifier
+            )
+        })
+        for (event, metadata) in routeCopies
+        where duplicates.contains(event.eventIdentifier ?? event.calendarItemIdentifier) {
+            result.deleted += 1
+            result.previews.append(SyncEventPreview(
+                id: metadata.copyID,
+                sourceTitle: event.title ?? "Untitled",
+                destinationTitle: event.title,
+                startDate: event.startDate,
+                action: .delete,
+                message: settings.dryRun
+                    ? "Would remove duplicate copy (another copy of the same source event is kept)"
+                    : "Removed duplicate copy (another copy of the same source event is kept)",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+            guard !settings.dryRun else {
+                continue
+            }
+            do {
+                try store.remove(event, span: .thisEvent, commit: true)
+            } catch {
+                result.failed += 1
+                result.previews.append(SyncEventPreview(
+                    id: metadata.copyID,
+                    sourceTitle: event.title ?? "Untitled",
+                    destinationTitle: nil,
+                    startDate: event.startDate,
+                    action: .error,
+                    message: "Duplicate removal failed: \(error.localizedDescription)",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName
+                ))
+            }
+        }
+
+        for (event, metadata) in routeCopies
+        where !duplicates.contains(event.eventIdentifier ?? event.calendarItemIdentifier) {
+            var violations = freeBusy
+                ? FreeBusyCompliance.violations(of: event, expectedTitle: expectedTitle)
+                : (event.hasRecurrenceRules ? ["recurrence"] : [])
+            if metadata.hasPlainCalendarNames {
+                // Markers from before calendar names were hashed; rewriting the notes hashes them.
+                violations.append("marker")
+            }
+            guard !violations.isEmpty else {
+                continue
+            }
+
+            let recurring = event.hasRecurrenceRules
+            if recurring {
+                guard removedSeries.insert(event.calendarItemIdentifier).inserted else {
+                    continue
+                }
+                result.deleted += 1
+            } else {
+                result.updated += 1
+            }
+            let stripped = violations.joined(separator: ", ")
+            let message = recurring
+                ? (settings.dryRun ? "Would remove recurring copy (\(stripped)) for single-occurrence recreation" : "Removed recurring copy (\(stripped)) for single-occurrence recreation")
+                : freeBusy
+                    ? (settings.dryRun ? "Would strip free/busy copy: \(stripped)" : "Stripped free/busy copy: \(stripped)")
+                    : (settings.dryRun ? "Would rewrite copy: \(stripped)" : "Rewrote copy: \(stripped)")
+            result.previews.append(SyncEventPreview(
+                id: metadata.copyID,
+                sourceTitle: event.title ?? "Untitled",
+                destinationTitle: freeBusy ? (expectedTitle ?? event.title) : event.title,
+                startDate: event.startDate,
+                action: recurring ? .delete : .update,
+                message: message,
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+
+            guard !settings.dryRun else {
+                continue
+            }
+
+            do {
+                if recurring {
+                    try store.remove(event, span: .futureEvents, commit: true)
+                } else if freeBusy {
+                    FreeBusyCompliance.strip(event, metadata: metadata, expectedTitle: expectedTitle)
+                    if settings.transform.markFreeBusyEventsPrivate {
+                        markPrivateIfSupported(event)
+                    }
+                    try store.save(event, span: .thisEvent, commit: true)
+                } else {
+                    event.notes = BridgeEventMetadata.notesByAddingMarker(to: event.notes, metadata: metadata)
+                    try store.save(event, span: .thisEvent, commit: true)
+                }
+            } catch {
+                result.failed += 1
+                result.previews.append(SyncEventPreview(
+                    id: metadata.copyID,
+                    sourceTitle: event.title ?? "Untitled",
+                    destinationTitle: nil,
+                    startDate: event.startDate,
+                    action: .error,
+                    message: "Copy cleanup failed: \(error.localizedDescription)",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName
+                ))
+            }
+        }
+    }
+
+    public struct DuplicateCandidate: Equatable, Sendable {
+        public var copyID: String
+        public var creationDate: Date?
+        public var externalIdentifier: String?
+        public var eventIdentifier: String
+
+        public init(copyID: String, creationDate: Date?, externalIdentifier: String?, eventIdentifier: String) {
+            self.copyID = copyID
+            self.creationDate = creationDate
+            self.externalIdentifier = externalIdentifier
+            self.eventIdentifier = eventIdentifier
+        }
+    }
+
+    /// Event identifiers of surplus copies: for each copy ID with more than one copy, all but the keeper.
+    /// Every Mac must pick the same keeper, so it is the earliest created, then the smallest cross-device
+    /// identifier, both of which are the same on every Mac once calendars have synced.
+    public static func duplicateCopies(in candidates: [DuplicateCandidate]) -> Set<String> {
+        var surplus = Set<String>()
+        for group in Dictionary(grouping: candidates, by: \.copyID).values where group.count > 1 {
+            let ordered = group.sorted { lhs, rhs in
+                let lhsDate = lhs.creationDate ?? .distantFuture
+                let rhsDate = rhs.creationDate ?? .distantFuture
+                if lhsDate != rhsDate {
+                    return lhsDate < rhsDate
+                }
+                return (lhs.externalIdentifier ?? lhs.eventIdentifier) < (rhs.externalIdentifier ?? rhs.eventIdentifier)
+            }
+            surplus.formUnion(ordered.dropFirst().map(\.eventIdentifier))
+        }
+        return surplus
+    }
+
+    private func reconcileDeletedCopies(
+        sourceEvents: [EKEvent],
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        settings: BridgeSettings,
+        result: inout SyncResult
+    ) {
+        let sourceCalendarName = calendarDisplayName(for: sourceCalendarKey)
+        let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
+        let copyMode = settings.transform.copyAsFreeBusyOnly ? "freeBusy" : "details"
+        let currentMappingIDs = Set(sourceEvents.map {
+            EventMapping.makeID(
+                sourceCalendarKey: sourceCalendarKey,
+                destinationCalendarKey: destinationCalendarKey,
+                sourceEventIdentifier: $0.eventIdentifier,
+                sourceStartDate: $0.startDate
+            )
+        })
+        let currentSourceIdentities = Set(sourceEvents.map {
+            BridgeEventMetadata.makeSourceIdentity(
+                sourceCalendarName: sourceCalendarName,
+                sourceEventExternalIdentifier: $0.calendarItemExternalIdentifier,
+                sourceEventIdentifier: $0.eventIdentifier,
+                sourceStartDate: $0.startDate
+            )
+        })
+        let trackedMappings = ledger.mappings(
+            sourceCalendarKey: sourceCalendarKey,
+            destinationCalendarKey: destinationCalendarKey,
+            startDate: settings.startDate,
+            endDate: settings.endDate
+        )
+        var reconciledDestinationIdentifiers = Set<String>()
+
+        for mapping in trackedMappings where !currentMappingIDs.contains(mapping.id) {
+            guard let destinationEvent = store.event(withIdentifier: mapping.destinationEventIdentifier) else {
+                result.skipped += 1
+                result.previews.append(SyncEventPreview(
+                    id: mapping.id,
+                    sourceTitle: "Deleted source event",
+                    destinationTitle: nil,
+                    startDate: mapping.sourceStartDate,
+                    action: .skipDuplicate,
+                    message: settings.dryRun ? "Destination copy is already missing" : "Removed stale mapping for missing destination copy",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName
+                ))
+                if !settings.dryRun {
+                    ledger.remove(id: mapping.id)
+                }
+                continue
+            }
+            reconciledDestinationIdentifiers.insert(destinationEvent.eventIdentifier)
+
+            result.deleted += 1
+            result.previews.append(SyncEventPreview(
+                id: mapping.id,
+                sourceTitle: "Deleted source event",
+                destinationTitle: destinationEvent.title,
+                startDate: mapping.sourceStartDate,
+                action: .delete,
+                message: settings.dryRun ? "Would delete copy for missing source event" : "Deleted copy for missing source event",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+
+            guard !settings.dryRun else {
+                continue
+            }
+
+            do {
+                try store.remove(destinationEvent, span: .thisEvent, commit: true)
+                ledger.remove(id: mapping.id)
+            } catch {
+                result.failed += 1
+                result.previews.append(SyncEventPreview(
+                    id: mapping.id,
+                    sourceTitle: "Deleted source event",
+                    destinationTitle: destinationEvent.title,
+                    startDate: mapping.sourceStartDate,
+                    action: .error,
+                    message: error.localizedDescription,
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName
+                ))
+            }
+        }
+
+        let destinationCalendar = calendar(for: destinationCalendarKey)
+        if let destinationCalendar {
+            for destinationEvent in self.events(from: settings.startDate, to: settings.endDate, calendars: [destinationCalendar]) {
+                guard !reconciledDestinationIdentifiers.contains(destinationEvent.eventIdentifier),
+                      let metadata = BridgeEventMetadata.parse(from: destinationEvent.notes),
+                      BridgeEventMetadata.storedName(metadata.sourceCalendarName, matches: sourceCalendarName),
+                      BridgeEventMetadata.storedName(metadata.destinationCalendarName, matches: destinationCalendarName),
+                      metadata.copyMode == copyMode,
+                      !currentSourceIdentities.contains(metadata.sourceIdentity)
+                else {
+                    continue
+                }
+
+                result.deleted += 1
+                result.previews.append(SyncEventPreview(
+                    id: metadata.copyID,
+                    sourceTitle: "Deleted source event",
+                    destinationTitle: destinationEvent.title,
+                    startDate: destinationEvent.startDate,
+                    action: .delete,
+                    message: settings.dryRun ? "Would delete metadata-tracked copy for missing source event" : "Deleted metadata-tracked copy for missing source event",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName
+                ))
+
+                guard !settings.dryRun else {
+                    continue
+                }
+
+                do {
+                    try store.remove(destinationEvent, span: .thisEvent, commit: true)
+                } catch {
+                    result.failed += 1
+                    result.previews.append(SyncEventPreview(
+                        id: metadata.copyID,
+                        sourceTitle: "Deleted source event",
+                        destinationTitle: destinationEvent.title,
+                        startDate: destinationEvent.startDate,
+                        action: .error,
+                        message: error.localizedDescription,
+                        sourceCalendarName: sourceCalendarName,
+                        destinationCalendarName: destinationCalendarName
+                    ))
+                }
+            }
+        }
+    }
+
+    private func deleteDestinationCopy(
+        sourceEvent: EKEvent,
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        settings: BridgeSettings,
+        result: inout SyncResult
+    ) {
+        let sourceTitle = sourceEvent.title ?? "Untitled"
+        let sourceCalendarName = calendarDisplayName(for: sourceCalendarKey)
+        let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
+
+        guard let mapping = ledger.mapping(
+            sourceCalendarKey: sourceCalendarKey,
+            destinationCalendarKey: destinationCalendarKey,
+            sourceEventIdentifier: sourceEvent.eventIdentifier,
+            sourceStartDate: sourceEvent.startDate
+        ) else {
+            result.skipped += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: sourceTitle,
+                destinationTitle: nil,
+                startDate: sourceEvent.startDate,
+                action: .skipDuplicate,
+                message: "No mapped destination copy found",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+            return
+        }
+
+        guard let destinationEvent = store.event(withIdentifier: mapping.destinationEventIdentifier) else {
+            result.skipped += 1
+            result.previews.append(SyncEventPreview(
+                id: mapping.id,
+                sourceTitle: sourceTitle,
+                destinationTitle: nil,
+                startDate: sourceEvent.startDate,
+                action: .skipDuplicate,
+                message: settings.dryRun ? "Destination copy is already missing" : "Removed stale mapping for missing destination copy",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+            if !settings.dryRun {
+                ledger.remove(id: mapping.id)
+            }
+            return
+        }
+
+        result.deleted += 1
+        result.previews.append(SyncEventPreview(
+            id: mapping.id,
+            sourceTitle: sourceTitle,
+            destinationTitle: destinationEvent.title,
+            startDate: sourceEvent.startDate,
+            action: .delete,
+            message: settings.dryRun ? "Would delete destination copy" : "Deleted destination copy",
+            sourceCalendarName: sourceCalendarName,
+            destinationCalendarName: destinationCalendarName
+        ))
+
+        guard !settings.dryRun else {
+            return
+        }
+
+        do {
+            try store.remove(destinationEvent, span: .thisEvent, commit: true)
+            ledger.remove(id: mapping.id)
+        } catch {
+            result.failed += 1
+            result.previews.append(SyncEventPreview(
+                id: mapping.id,
+                sourceTitle: sourceTitle,
+                destinationTitle: destinationEvent.title,
+                startDate: sourceEvent.startDate,
+                action: .error,
+                message: error.localizedDescription,
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+        }
+    }
+
+    private func appendCreatePreview(
+        sourceEvent: EKEvent,
+        destinationTitle: String,
+        sourceCalendarName: String,
+        destinationCalendarName: String,
+        sourceAvailability: String?,
+        resultingAvailability: String?,
+        transformationSummary: String,
+        result: inout SyncResult
+    ) {
+        result.created += 1
+        result.previews.append(SyncEventPreview(
+            id: UUID().uuidString,
+            sourceTitle: sourceEvent.title ?? "Untitled",
+            destinationTitle: destinationTitle,
+            startDate: sourceEvent.startDate,
+            action: .create,
+            message: "Will create a new copy",
+            sourceCalendarName: sourceCalendarName,
+            destinationCalendarName: destinationCalendarName,
+            sourceAvailability: sourceAvailability,
+            resultingAvailability: resultingAvailability,
+            transformationSummary: transformationSummary
+        ))
+    }
+
+    private func createCopy(
+        sourceEvent: EKEvent,
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        destinationCalendar: EKCalendar,
+        fingerprint: String,
+        sourceCalendarName: String,
+        originCalendarName: String?,
+        copyID: String,
+        sourceIdentity: String,
+        settings: BridgeSettings,
+        result: inout SyncResult
+    ) {
+        let destinationEvent = EKEvent(eventStore: store)
+        let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
+        let copyMode = settings.transform.copyAsFreeBusyOnly ? "freeBusy" : "details"
+        apply(
+            sourceEvent: sourceEvent,
+            to: destinationEvent,
+            destinationCalendar: destinationCalendar,
+            transform: settings.transform,
+            sourceCalendarName: sourceCalendarName,
+            originCalendarName: originCalendarName,
+            metadata: metadataForCopy(
+                copyID: copyID,
+                sourceIdentity: sourceIdentity,
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName,
+                originCalendarName: originCalendarName ?? sourceCalendarName,
+                originCalendarKey: originCalendarKey(forSourceEvent: sourceEvent, fallback: sourceCalendarKey),
+                copyMode: copyMode,
+                fingerprint: fingerprint,
+                sourceEvent: sourceEvent,
+                transform: settings.transform
+            )
+        )
+
+        do {
+            try store.save(destinationEvent, span: .thisEvent, commit: true)
+            upsertLedgerMapping(
+                sourceEvent: sourceEvent,
+                sourceCalendarKey: sourceCalendarKey,
+                destinationCalendarKey: destinationCalendarKey,
+                destinationEvent: destinationEvent,
+                fingerprint: fingerprint,
+                copyMode: copyMode
+            )
+        } catch {
+            result.failed += 1
+            result.previews.append(SyncEventPreview(
+                id: UUID().uuidString,
+                sourceTitle: sourceEvent.title ?? "Untitled",
+                destinationTitle: destinationEvent.title,
+                startDate: sourceEvent.startDate,
+                action: .error,
+                message: error.localizedDescription,
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: calendarDisplayName(for: destinationCalendarKey)
+            ))
+        }
+    }
+
+    private func apply(
+        sourceEvent: EKEvent,
+        to destinationEvent: EKEvent,
+        destinationCalendar: EKCalendar,
+        transform: TransformSettings,
+        sourceCalendarName: String,
+        originCalendarName: String?,
+        metadata: BridgeEventMetadata? = nil
+    ) {
+        destinationEvent.calendar = destinationCalendar
+        destinationEvent.title = transform.destinationTitle(
+            for: sourceEvent.title ?? "Untitled",
+            sourceCalendarName: sourceCalendarName,
+            originCalendarName: originCalendarName
+        )
+        destinationEvent.startDate = sourceEvent.startDate
+        destinationEvent.endDate = sourceEvent.endDate
+        destinationEvent.isAllDay = sourceEvent.isAllDay
+        destinationEvent.timeZone = sourceEvent.timeZone
+        if let availability = eventAvailability(
+            for: transform.destinationAvailability,
+            sourceEvent: sourceEvent,
+            destinationCalendar: destinationCalendar
+        ) {
+            destinationEvent.availability = availability
+        }
+        if transform.copyAsFreeBusyOnly, transform.markFreeBusyEventsPrivate {
+            markPrivateIfSupported(destinationEvent)
+        }
+        let copiesLocation = !transform.copyAsFreeBusyOnly && transform.copyLocation
+        if copiesLocation, let place = EventFingerprint.geoPlace(of: sourceEvent) {
+            // Build a new place rather than copying the source's persisted one, which fails to save into
+            // another calendar. Setting structuredLocation replaces the location text with the place title,
+            // and setting different text afterwards drops the coordinates, so carry the source text as the title.
+            let destinationPlace = EKStructuredLocation(title: sourceEvent.location ?? place.title ?? "")
+            destinationPlace.geoLocation = place.geoLocation
+            destinationPlace.radius = place.radius
+            destinationEvent.structuredLocation = destinationPlace
+        } else {
+            if destinationEvent.structuredLocation?.geoLocation != nil {
+                destinationEvent.structuredLocation = nil
+            }
+            destinationEvent.location = copiesLocation ? sourceEvent.location : nil
+        }
+        destinationEvent.url = transform.copyAsFreeBusyOnly ? nil : (transform.copyURL ? sourceEvent.url : nil)
+        var transformedNotes = transform.destinationNotes(for: sourceEvent.notes)
+        if !transform.copyAsFreeBusyOnly, let details = EventDetailsSummary.text(for: sourceEvent) {
+            transformedNotes = [transformedNotes, details].compactMap { $0 }.joined(separator: "\n\n")
+        }
+        if let metadata {
+            destinationEvent.notes = BridgeEventMetadata.notesByAddingMarker(to: transformedNotes, metadata: metadata)
+        } else {
+            destinationEvent.notes = transformedNotes
+        }
+
+        // Each occurrence is copied as its own event, so copies never carry recurrence rules (a rule on an
+        // occurrence copy would expand into phantom events); full-detail copies describe it in their notes.
+        if transform.copyAsFreeBusyOnly {
+            // Free/busy copies never alert.
+            destinationEvent.alarms = nil
+        } else if let alarms = sourceEvent.alarms {
+            destinationEvent.alarms = alarms.map { $0.copy() as? EKAlarm }.compactMap { $0 }
+        }
+    }
+
+    private func markPrivateIfSupported(_ event: EKEvent) {
+        let allowsSelector = Selector(("allowsPrivacyLevelModifications"))
+        let setterSelector = Selector(("setPrivacyLevel:"))
+        guard event.responds(to: allowsSelector), event.responds(to: setterSelector) else {
+            return
+        }
+
+        typealias AllowsPrivacyGetter = @convention(c) (AnyObject, Selector) -> Bool
+        typealias PrivacySetter = @convention(c) (AnyObject, Selector, Int) -> Void
+
+        let allowsPrivacy = unsafeBitCast(
+            event.method(for: allowsSelector),
+            to: AllowsPrivacyGetter.self
+        )
+        guard allowsPrivacy(event, allowsSelector) else {
+            return
+        }
+
+        let setPrivacy = unsafeBitCast(
+            event.method(for: setterSelector),
+            to: PrivacySetter.self
+        )
+        setPrivacy(event, setterSelector, 2)
+    }
+
+    /// Why a source event should not produce a copy under the run's skip settings, or nil to copy it.
+    private func nonBlockingReason(for event: EKEvent, settings: BridgeSettings) -> String? {
+        let metadata = BridgeEventMetadata.parse(from: event.notes)
+        if settings.skipDeclinedSourceEvents,
+           metadata?.declined == true || EventDetailsSummary.declinedByCurrentUser(event) {
+            return "you declined this meeting"
+        }
+        if settings.skipFreeSourceEvents,
+           (metadataAvailability(from: event) ?? supportedAvailability(event.availability)) == .free {
+            return "marked Free"
+        }
+        return nil
+    }
+
+    private func metadataForCopy(
+        copyID: String,
+        sourceIdentity: String,
+        sourceCalendarName: String,
+        destinationCalendarName: String,
+        originCalendarName: String,
+        originCalendarKey: String,
+        copyMode: String,
+        fingerprint: String,
+        sourceEvent: EKEvent,
+        transform: TransformSettings
+    ) -> BridgeEventMetadata {
+        let sourceMetadata = BridgeEventMetadata.parse(from: sourceEvent.notes)
+        let sourceAvailability = sourceMetadata?.sourceAvailability ?? availabilityName(for: sourceEvent.availability)
+        let intendedAvailability = intendedAvailabilityName(
+            for: transform.destinationAvailability,
+            sourceEvent: sourceEvent,
+            sourceMetadata: sourceMetadata
+        )
+        return BridgeEventMetadata(
+            copyID: copyID,
+            sourceIdentity: sourceIdentity,
+            sourceCalendarName: sourceCalendarName,
+            sourceCalendarKeyHash: EventFingerprint.hash(parts: [sourceCalendarName]),
+            destinationCalendarName: destinationCalendarName,
+            originCalendarName: originCalendarName,
+            originCalendarKeyHash: EventFingerprint.hash(parts: [originCalendarKey]),
+            copyMode: copyMode,
+            fingerprint: fingerprint,
+            sourceAvailability: sourceAvailability,
+            intendedAvailability: intendedAvailability,
+            declined: !transform.copyAsFreeBusyOnly && EventDetailsSummary.declinedByCurrentUser(sourceEvent) ? true : nil
+        )
+    }
+
+    private func findExistingCopyBySyncedMetadata(
+        copyIDs: [String],
+        sourceEvent: EKEvent,
+        destinationCalendar: EKCalendar
+    ) -> EKEvent? {
+        let start = sourceEvent.startDate.addingTimeInterval(-60)
+        let end = sourceEvent.endDate.addingTimeInterval(60)
+        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [destinationCalendar])
+        return store.events(matching: predicate).first {
+            BridgeEventMetadata.parse(from: $0.notes).map { copyIDs.contains($0.copyID) } ?? false
+        }
+    }
+
+    private func sourceOriginMatchesDestination(
+        sourceEvent: EKEvent,
+        sourceCalendarKey: String,
+        destinationCalendarKey: String
+    ) -> Bool {
+        if let origin = ledger.mappingForDestinationEvent(
+            calendarKey: sourceCalendarKey,
+            eventIdentifier: sourceEvent.eventIdentifier
+        )?.sourceCalendarKey {
+            return origin == destinationCalendarKey
+        }
+
+        guard let metadata = BridgeEventMetadata.parse(from: sourceEvent.notes) else {
+            return false
+        }
+
+        let destinationName = calendarDisplayName(for: destinationCalendarKey)
+        let destinationKeyHash = EventFingerprint.hash(parts: [destinationCalendarKey])
+        return BridgeEventMetadata.storedName(metadata.originCalendarName, matches: destinationName)
+            || metadata.originCalendarKeyHash == destinationKeyHash
+    }
+
+    private func originCalendarKey(forSourceEvent sourceEvent: EKEvent, fallback sourceCalendarKey: String) -> String {
+        ledger.mappingForDestinationEvent(
+            calendarKey: sourceCalendarKey,
+            eventIdentifier: sourceEvent.eventIdentifier
+        )?.sourceCalendarKey ?? sourceCalendarKey
+    }
+
+    private func upsertLedgerMapping(
+        sourceEvent: EKEvent,
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        destinationEvent: EKEvent,
+        fingerprint: String,
+        copyMode: String
+    ) {
+        ledger.upsert(EventMapping(
+            sourceCalendarKey: sourceCalendarKey,
+            destinationCalendarKey: destinationCalendarKey,
+            sourceEventIdentifier: sourceEvent.eventIdentifier,
+            sourceStartDate: sourceEvent.startDate,
+            sourceLastModifiedDate: sourceEvent.lastModifiedDate,
+            fingerprint: fingerprint,
+            destinationEventIdentifier: destinationEvent.eventIdentifier,
+            copyMode: copyMode
+        ))
+    }
+
+    private func originCalendarName(forSourceEvent sourceEvent: EKEvent, sourceCalendarKey: String) -> String? {
+        guard let originKey = ledger.mappingForDestinationEvent(
+            calendarKey: sourceCalendarKey,
+            eventIdentifier: sourceEvent.eventIdentifier
+        )?.sourceCalendarKey else {
+            return BridgeEventMetadata.parse(from: sourceEvent.notes).flatMap {
+                BridgeEventMetadata.resolveStoredName($0.originCalendarName, among: calendars().map(\.displayName))
+            }
+        }
+        return calendarDisplayName(for: originKey)
+    }
+
+    private func calendarDisplayName(for key: String) -> String {
+        calendars().first { $0.stableKey == key }?.displayName ?? key
+    }
+
+    private func transformationSummary(
+        transform: TransformSettings,
+        sourceTitle: String,
+        destinationTitle: String
+    ) -> String {
+        if transform.copyAsFreeBusyOnly {
+            return [
+                "Mode: free/busy block only",
+                "Title: \(destinationTitle)",
+                "Availability: \(transform.destinationAvailability.displayName)",
+                "Privacy: private where supported by the destination calendar",
+                "Location: stripped",
+                "Notes: stripped",
+                "URL: stripped",
+                "Alarms: stripped"
+            ].joined(separator: "\n")
+        }
+
+        var lines = [
+            "Mode: full detail copy",
+            "Source title: \(sourceTitle)",
+            "Transformed title: \(destinationTitle)",
+            "Availability: \(transform.destinationAvailability.displayName)",
+            "Location: \(transform.copyLocation ? "copied" : "stripped")",
+            "Notes: \(transform.copyNotes ? "copied" : "stripped")",
+            "URL: \(transform.copyURL ? "copied" : "stripped")",
+            "Alarms: copied"
+        ]
+        if !transform.notesFooter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            lines.append("Notes footer: appended")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private func eventAvailability(
+        for availability: DestinationAvailability,
+        sourceEvent: EKEvent,
+        destinationCalendar: EKCalendar
+    ) -> EKEventAvailability? {
+        let target: EKEventAvailability?
+        switch availability {
+        case .preserve:
+            target = metadataAvailability(from: sourceEvent) ?? supportedAvailability(sourceEvent.availability)
+        case .free:
+            target = .free
+        case .busy:
+            target = .busy
+        case .tentative:
+            target = .tentative
+        }
+        guard let target,
+              destinationCalendar.supportedEventAvailabilities.supports(target)
+        else {
+            return nil
+        }
+        return target
+    }
+
+    private func intendedAvailabilityName(
+        for availability: DestinationAvailability,
+        sourceEvent: EKEvent,
+        sourceMetadata: BridgeEventMetadata?
+    ) -> String? {
+        switch availability {
+        case .preserve:
+            sourceMetadata?.intendedAvailability
+                ?? sourceMetadata?.sourceAvailability
+                ?? availabilityName(for: sourceEvent.availability)
+        case .free, .busy, .tentative:
+            availability.rawValue
+        }
+    }
+
+    private func availabilityDisplayName(_ availability: EKEventAvailability?) -> String {
+        guard let availability else {
+            return "Not written"
+        }
+        switch availability {
+        case .free:
+            return "Free"
+        case .busy:
+            return "Busy"
+        case .tentative:
+            return "Tentative"
+        case .unavailable:
+            return "Unavailable"
+        case .notSupported:
+            return "Not supported"
+        @unknown default:
+            return "Unknown"
+        }
+    }
+
+    private func sourceAvailabilityDisplayName(for event: EKEvent) -> String {
+        if let metadata = BridgeEventMetadata.parse(from: event.notes),
+           let availability = availability(named: metadata.sourceAvailability ?? metadata.intendedAvailability) {
+            return availabilityDisplayName(availability)
+        }
+        return availabilityDisplayName(supportedAvailability(event.availability))
+    }
+
+    private func metadataAvailability(from event: EKEvent) -> EKEventAvailability? {
+        guard let metadata = BridgeEventMetadata.parse(from: event.notes) else {
+            return nil
+        }
+        return availability(
+            named: metadata.intendedAvailability ?? metadata.sourceAvailability
+        )
+    }
+
+    private func supportedAvailability(_ availability: EKEventAvailability) -> EKEventAvailability? {
+        switch availability {
+        case .free, .busy, .tentative, .unavailable:
+            availability
+        case .notSupported:
+            nil
+        @unknown default:
+            nil
+        }
+    }
+
+    private func availabilityName(for availability: EKEventAvailability) -> String? {
+        switch availability {
+        case .free:
+            "free"
+        case .busy:
+            "busy"
+        case .tentative:
+            "tentative"
+        case .unavailable:
+            "unavailable"
+        case .notSupported:
+            nil
+        @unknown default:
+            nil
+        }
+    }
+
+    private func availability(named name: String?) -> EKEventAvailability? {
+        switch name {
+        case "free":
+            .free
+        case "busy":
+            .busy
+        case "tentative":
+            .tentative
+        case "unavailable":
+            .unavailable
+        default:
+            nil
+        }
+    }
+}
+
+private extension EKCalendarEventAvailabilityMask {
+    func supports(_ availability: EKEventAvailability) -> Bool {
+        switch availability {
+        case .free:
+            contains(.free)
+        case .busy:
+            contains(.busy)
+        case .tentative:
+            contains(.tentative)
+        case .unavailable:
+            contains(.unavailable)
+        case .notSupported:
+            false
+        @unknown default:
+            false
+        }
+    }
+}
