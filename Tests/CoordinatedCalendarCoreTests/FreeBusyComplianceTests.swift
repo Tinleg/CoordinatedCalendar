@@ -75,3 +75,22 @@ private func compliantCopy() -> EKEvent {
 
     #expect(FreeBusyCompliance.violations(of: event, expectedTitle: nil).isEmpty)
 }
+
+@Test func aFreeBusyCopyNamingItsSourceIsAViolationAndIsStripped() {
+    // The consolidated calendar may name the source event in the clear; a busy block in someone
+    // else's account may not, whatever route or older build put it there.
+    var named = complianceMetadata
+    named.sourceEventID = "1B2C3D4E-0000-0000-0000-000000000001"
+    named.sourceEventExternalID = "external-id"
+    named.sourceCalendarPlainName = "Work / Calendar"
+    let event = compliantCopy()
+    event.notes = BridgeEventMetadata.notesByAddingMarker(to: nil, metadata: named)
+
+    #expect(FreeBusyCompliance.violations(of: event, expectedTitle: FreeBusyCompliance.fanOutTitle) == ["source reference"])
+
+    FreeBusyCompliance.strip(event, metadata: named, expectedTitle: FreeBusyCompliance.fanOutTitle)
+    let stripped = BridgeEventMetadata.parse(from: event.notes)
+    #expect(stripped?.carriesSourceReference == false)
+    #expect(stripped?.copyID == named.copyID)
+    #expect(FreeBusyCompliance.violations(of: event, expectedTitle: FreeBusyCompliance.fanOutTitle).isEmpty)
+}

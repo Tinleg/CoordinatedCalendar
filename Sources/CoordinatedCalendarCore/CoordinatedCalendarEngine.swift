@@ -436,7 +436,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             )
             let existingMetadata = BridgeEventMetadata.parse(from: destinationEvent.notes)
 
-            if existingMetadata?.fingerprint == fingerprint, existingMetadata?.copyID == copyID {
+            if existingMetadata?.fingerprint == fingerprint, existingMetadata?.copyID == copyID,
+               !needsSourceReference(existingMetadata, copyMode: copyMode) {
                 result.skipped += 1
                 result.previews.append(SyncEventPreview(
                     id: copyID,
@@ -568,7 +569,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             }
 
             if existing.fingerprint == fingerprint {
-                if BridgeEventMetadata.parse(from: destinationEvent.notes)?.copyID != copyID {
+                let storedMetadata = BridgeEventMetadata.parse(from: destinationEvent.notes)
+                if storedMetadata?.copyID != copyID || needsSourceReference(storedMetadata, copyMode: copyMode) {
                     result.updated += 1
                     result.previews.append(SyncEventPreview(
                         id: existing.id,
@@ -1353,6 +1355,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         sourceEvent: EKEvent,
         transform: TransformSettings
     ) -> BridgeEventMetadata {
+        let detailsCopy = namesSourceInTheClear(copyMode)
         let sourceMetadata = BridgeEventMetadata.parse(from: sourceEvent.notes)
         let sourceAvailability = sourceMetadata?.sourceAvailability ?? availabilityName(for: sourceEvent.availability)
         let intendedAvailability = intendedAvailabilityName(
@@ -1372,8 +1375,23 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             fingerprint: fingerprint,
             sourceAvailability: sourceAvailability,
             intendedAvailability: intendedAvailability,
-            declined: !transform.copyAsFreeBusyOnly && EventDetailsSummary.declinedByCurrentUser(sourceEvent) ? true : nil
+            declined: !transform.copyAsFreeBusyOnly && EventDetailsSummary.declinedByCurrentUser(sourceEvent) ? true : nil,
+            sourceEventID: detailsCopy ? sourceEvent.calendarItemIdentifier : nil,
+            sourceEventExternalID: detailsCopy ? sourceEvent.calendarItemExternalIdentifier : nil,
+            sourceCalendarPlainName: detailsCopy ? sourceCalendarName : nil
         )
+    }
+
+    /// A full-detail copy goes to your own consolidated calendar, so its marker names the source in
+    /// the clear; a free/busy copy goes to someone else's calendar and never does.
+    private func namesSourceInTheClear(_ copyMode: String) -> Bool { copyMode == "details" }
+
+    /// True for a full-detail copy written before markers named their source: the marker is rewritten
+    /// in place on the next run. The fingerprint is deliberately not involved — changing it would
+    /// rewrite every copy on every route, and this needs only the copies that lack the reference.
+    private func needsSourceReference(_ metadata: BridgeEventMetadata?, copyMode: String) -> Bool {
+        guard let metadata, namesSourceInTheClear(copyMode) else { return false }
+        return metadata.sourceEventID == nil
     }
 
     private func findExistingCopyBySyncedMetadata(

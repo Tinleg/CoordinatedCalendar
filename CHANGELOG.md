@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Full-detail copies now name their source event in the clear.** A copy in your consolidated calendar carries the source event's identifier, its cross-device identifier and the source calendar's display name in its marker, so a tool reading the consolidated calendar can match a copy to the event it came from exactly instead of guessing by title and time. The consolidated calendar is your own hub; **free/busy copies are unchanged and still reveal nothing**, and a busy block found carrying a source reference is treated as a violation and stripped. Existing consolidated copies gain the reference the next time they sync, updated in place, so their event IDs do not change.
+
 ## 0.1.2
 
 - New app icon: a monthly desk calendar with an amber ² ("calendar squared"), replacing the C². The social preview image uses it too.

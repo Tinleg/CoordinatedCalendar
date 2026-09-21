@@ -10,6 +10,12 @@ public enum FreeBusyCompliance {
     /// title is intentionally source-derived (the `--origin-title` copy option), so it is not checked.
     public static func violations(of event: EKEvent, expectedTitle: String?) -> [String] {
         var violations: [String] = []
+        if BridgeEventMetadata.parse(from: event.notes)?.carriesSourceReference == true {
+            // Clear-text source references belong to the consolidated calendar alone. One here means
+            // a copy was made as full detail and later routed as free/busy, or written by an older
+            // build; either way it names another calendar's event inside someone else's account.
+            violations.append("source reference")
+        }
         if let expectedTitle, event.title != expectedTitle {
             violations.append("title")
         }
@@ -40,6 +46,6 @@ public enum FreeBusyCompliance {
         event.location = nil
         event.url = nil
         event.alarms = nil
-        event.notes = BridgeEventMetadata.notesByAddingMarker(to: nil, metadata: metadata)
+        event.notes = BridgeEventMetadata.notesByAddingMarker(to: nil, metadata: metadata.withoutSourceReference)
     }
 }

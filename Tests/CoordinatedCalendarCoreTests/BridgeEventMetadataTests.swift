@@ -147,3 +147,45 @@ private let namedMetadata = BridgeEventMetadata(
     #expect(try keys(declined).contains("declined"))
     #expect(BridgeEventMetadata.parse(from: declined.encodedMarker)?.declined == true)
 }
+
+@Test func aDetailsMarkerCarriesItsSourceInTheClearThroughEncoding() {
+    let metadata = BridgeEventMetadata(
+        copyID: "copy",
+        sourceIdentity: "identity",
+        sourceCalendarName: "Work / Calendar",
+        sourceCalendarKeyHash: "sourceHash",
+        destinationCalendarName: "iCloud / Consolidated",
+        originCalendarName: "Work / Calendar",
+        originCalendarKeyHash: "originHash",
+        copyMode: "details",
+        fingerprint: "fingerprint",
+        sourceEventID: "1B2C3D4E-0000-0000-0000-000000000001",
+        sourceEventExternalID: "external-id",
+        sourceCalendarPlainName: "Work / Calendar"
+    )
+
+    let parsed = BridgeEventMetadata.parse(from: BridgeEventMetadata.notesByAddingMarker(to: "Notes", metadata: metadata))
+    #expect(parsed?.sourceEventID == "1B2C3D4E-0000-0000-0000-000000000001")
+    #expect(parsed?.sourceEventExternalID == "external-id")
+    // The hashed name is still hashed: nothing that reads markers today changes meaning.
+    #expect(parsed?.sourceCalendarName.hasPrefix("sha256:") == true)
+    #expect(parsed?.sourceCalendarPlainName == "Work / Calendar")
+    #expect(parsed?.carriesSourceReference == true)
+}
+
+@Test func aMarkerWithoutSourceFieldsStillParsesAndCarriesNothing() {
+    let metadata = BridgeEventMetadata(
+        copyID: "copy",
+        sourceIdentity: "identity",
+        sourceCalendarName: "Work / Calendar",
+        sourceCalendarKeyHash: "sourceHash",
+        destinationCalendarName: "Client / Calendar",
+        originCalendarName: "Work / Calendar",
+        originCalendarKeyHash: "originHash",
+        copyMode: "freeBusy",
+        fingerprint: "fingerprint"
+    )
+    let parsed = BridgeEventMetadata.parse(from: metadata.encodedMarker)
+    #expect(parsed?.carriesSourceReference == false)
+    #expect(parsed?.sourceEventID == nil)
+}

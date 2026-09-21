@@ -21,6 +21,17 @@ public struct BridgeEventMetadata: Codable, Equatable, Sendable {
     public var intendedAvailability: String?
     /// True when you declined the source meeting; omitted otherwise, so other markers are unchanged.
     public var declined: Bool?
+    /// The source event's own identifier, in the clear. Written only on full-detail copies — the
+    /// consolidated calendar is your own hub, so a tool reading it can match a copy to the event it
+    /// came from exactly, instead of guessing by title and time. A free/busy copy sits in someone
+    /// else's account and never carries these: `FreeBusyCompliance` treats their presence as a
+    /// violation and strips them.
+    public var sourceEventID: String?
+    /// The source event's cross-device identifier, in the clear, under the same rule as `sourceEventID`.
+    public var sourceEventExternalID: String?
+    /// The source calendar's display name, in the clear, under the same rule as `sourceEventID`.
+    /// `sourceCalendarName` stays hashed, so nothing that reads markers today changes meaning.
+    public var sourceCalendarPlainName: String?
 
     public init(
         version: Int = 1,
@@ -35,7 +46,10 @@ public struct BridgeEventMetadata: Codable, Equatable, Sendable {
         fingerprint: String,
         sourceAvailability: String? = nil,
         intendedAvailability: String? = nil,
-        declined: Bool? = nil
+        declined: Bool? = nil,
+        sourceEventID: String? = nil,
+        sourceEventExternalID: String? = nil,
+        sourceCalendarPlainName: String? = nil
     ) {
         self.version = version
         self.copyID = copyID
@@ -50,6 +64,24 @@ public struct BridgeEventMetadata: Codable, Equatable, Sendable {
         self.sourceAvailability = sourceAvailability
         self.intendedAvailability = intendedAvailability
         self.declined = declined
+        self.sourceEventID = sourceEventID
+        self.sourceEventExternalID = sourceEventExternalID
+        self.sourceCalendarPlainName = sourceCalendarPlainName
+    }
+
+    /// Whether this marker names its source in the clear. True is correct on a full-detail copy in
+    /// your own consolidated calendar, and never correct on a copy in someone else's calendar.
+    public var carriesSourceReference: Bool {
+        sourceEventID != nil || sourceEventExternalID != nil || sourceCalendarPlainName != nil
+    }
+
+    /// The same marker with everything clear-text about the source removed.
+    public var withoutSourceReference: BridgeEventMetadata {
+        var stripped = self
+        stripped.sourceEventID = nil
+        stripped.sourceEventExternalID = nil
+        stripped.sourceCalendarPlainName = nil
+        return stripped
     }
 
     /// Namespace hashed into identities and name tokens, so they cannot collide with other hashes.

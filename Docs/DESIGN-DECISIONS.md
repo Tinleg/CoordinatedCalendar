@@ -34,11 +34,13 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 - IDs must be computed identically everywhere. They derive from the event's cross-device identifier, the occurrence start and calendar display names, so account and calendar names must match on every Mac.
 - When two Macs create the same copy before syncing, duplicates are resolved by a deterministic keeper (earliest created, then smallest cross-device identifier) so both Macs keep the same one.
 
-## Markers reveal no names
+## Markers reveal no names, except in your own hub
 
-**Decision:** calendar names inside the marker are `sha256:` tokens, and IDs are hashes. The marker holds no event content.
+**Decision:** calendar names inside the marker are `sha256:` tokens, and IDs are hashes. The marker holds no event content. **A full-detail copy is the exception:** in the consolidated calendar it also names its source event and source calendar in the clear.
 
-**Why:** a busy block sits in someone else's account (a client's Exchange calendar, say). Anyone who decodes its notes should learn nothing about your other calendars.
+**Why:** a busy block sits in someone else's account (a client's Exchange calendar, say). Anyone who decodes its notes should learn nothing about your other calendars. The consolidated calendar is not someone else's account — it is your own hub, and tools that read it need to know which event a copy came from. Hashing that away forced them to match on title and time, which fails exactly when an event is edited: a moved meeting looks like a different meeting. Naming the source ends that class of bug.
+
+**The boundary is enforced, not just intended:** the builder writes those fields only on full-detail copies, and `FreeBusyCompliance` treats a source reference on a busy block as a violation and strips it on the next run, whatever put it there.
 
 ## The identity namespace is part of every ID
 

@@ -81,7 +81,7 @@ The consolidated calendar is your private, complete view, and it keeps full, rea
 - **Notes:** the original notes in full, which for online meetings usually include join links, meeting IDs and passcodes. After them comes a `Source details:` block with the organizer and attendees (names, email addresses and responses), a tentative or canceled status, and the repeat rule.
 - **Also:** the URL, alarms and free/busy status.
 
-Only the last line of the notes, the CoordinatedCalendar marker, is encoded, and it holds nothing but hashes. The busy blocks on your other calendars carry none of these details.
+Only the last line of the notes, the CoordinatedCalendar marker, is encoded. In the consolidated calendar it also names the source event and its calendar in the clear, so tools that read your hub can tell exactly which event a copy came from. The busy blocks on your other calendars carry none of these details: their markers hold nothing but hashes, and a busy block found naming its source is stripped on the next run.
 
 Keep this in mind when choosing where the consolidated calendar lives and whom you share it with. Anyone who can see it can read all of it, including meeting passcodes and attendee addresses. That includes a person you share it with, and the provider of the account that hosts it. If an employer restricts copying meeting details into personal accounts, host the consolidated calendar under that work account instead. Consolidated Sync, in the GUI and the scheduled job, always copies full details. To gather less, run `--fan-in` from the command line with `--no-notes`, `--no-location` or `--no-url`. `--no-notes` drops the original notes, but the `Source details:` block with organizer and attendees is still added.
 
