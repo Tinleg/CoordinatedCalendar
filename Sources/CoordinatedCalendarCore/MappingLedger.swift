@@ -144,6 +144,21 @@ public final class MappingLedger: @unchecked Sendable {
             .sorted { $0.sourceStartDate < $1.sourceStartDate }
     }
 
+    /// Every mapping that produced this destination event. After an account is removed and re-added
+    /// there can be more than one: the stale one under the old calendar key and the current one.
+    public func mappingsForDestinationEvent(calendarKey: String, eventIdentifier: String) -> [EventMapping] {
+        mappings.values.filter {
+            $0.destinationCalendarKey == calendarKey && $0.destinationEventIdentifier == eventIdentifier
+        }
+    }
+
+    /// Forgets every mapping onto one destination event, for when that event is re-linked to a source.
+    public func removeMappings(destinationCalendarKey: String, destinationEventIdentifier: String) {
+        for mapping in mappingsForDestinationEvent(calendarKey: destinationCalendarKey, eventIdentifier: destinationEventIdentifier) {
+            mappings.removeValue(forKey: mapping.id)
+        }
+    }
+
     public func mappingForDestinationEvent(calendarKey: String, eventIdentifier: String) -> EventMapping? {
         mappings.values.first {
             $0.destinationCalendarKey == calendarKey && $0.destinationEventIdentifier == eventIdentifier

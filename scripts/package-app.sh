@@ -12,9 +12,9 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 BINARY="$BUILD_ROOT/release/CoordinatedCalendar"
 
-if [[ ! -x "$BINARY" ]]; then
-  swift build -c release --scratch-path "$BUILD_ROOT"
-fi
+# Always build: skipping the build when a binary already existed repackaged a stale one, silently,
+# with whatever the last release build happened to contain. The build is incremental, so it is cheap.
+swift build -c release --scratch-path "$BUILD_ROOT"
 
 rm -rf "$STAGE_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"

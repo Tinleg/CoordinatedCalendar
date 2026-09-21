@@ -6,6 +6,9 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
     public let store: EKEventStore
     private let ledger: MappingLedger
+    /// Copies a dry run would re-link, by the copy ID they would be given, so the same dry run reports
+    /// them as updated rather than as a deletion plus a creation. Reset at the start of every run.
+    private var dryRunRelinks: [String: EKEvent] = [:]
 
     public init(store: EKEventStore = EKEventStore(), ledger: MappingLedger) {
         self.store = store
@@ -78,6 +81,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
     public func run(settings: BridgeSettings, progress: ProgressHandler? = nil) async -> SyncResult {
         var result = SyncResult()
+        dryRunRelinks = [:]
 
         do {
             let (source, destination) = try validate(settings: settings)
@@ -421,7 +425,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             copyIDs: [copyID],
             sourceEvent: sourceEvent,
             destinationCalendar: destinationCalendar
-        ) {
+        ) ?? (settings.dryRun ? dryRunRelinks[copyID] : nil) {
             let metadata = metadataForCopy(
                 copyID: copyID,
                 sourceIdentity: sourceIdentity,
@@ -1022,16 +1026,32 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
         let destinationCalendar = calendar(for: destinationCalendarKey)
         if let destinationCalendar {
+            var routeCopyIdentities = Set<String>()
+            var orphans: [(event: EKEvent, metadata: BridgeEventMetadata)] = []
             for destinationEvent in self.events(from: settings.startDate, to: settings.endDate, calendars: [destinationCalendar]) {
-                guard !reconciledDestinationIdentifiers.contains(destinationEvent.eventIdentifier),
-                      let metadata = BridgeEventMetadata.parse(from: destinationEvent.notes),
+                guard let metadata = BridgeEventMetadata.parse(from: destinationEvent.notes),
                       BridgeEventMetadata.storedName(metadata.sourceCalendarName, matches: sourceCalendarName),
                       BridgeEventMetadata.storedName(metadata.destinationCalendarName, matches: destinationCalendarName),
-                      metadata.copyMode == copyMode,
-                      !currentSourceIdentities.contains(metadata.sourceIdentity)
+                      metadata.copyMode == copyMode
                 else {
                     continue
                 }
+                routeCopyIdentities.insert(metadata.sourceIdentity)
+                if !reconciledDestinationIdentifiers.contains(destinationEvent.eventIdentifier),
+                   !currentSourceIdentities.contains(metadata.sourceIdentity) {
+                    orphans.append((destinationEvent, metadata))
+                }
+            }
+            let relinked = relinkOrphanedCopies(
+                orphans: orphans,
+                sourceEvents: sourceEvents,
+                claimedIdentities: routeCopyIdentities,
+                sourceCalendarKey: sourceCalendarKey,
+                destinationCalendarKey: destinationCalendarKey,
+                settings: settings,
+                result: &result
+            )
+            for (destinationEvent, metadata) in orphans where !relinked.contains(destinationEvent.eventIdentifier) {
 
                 result.deleted += 1
                 result.previews.append(SyncEventPreview(
@@ -1066,6 +1086,161 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                 }
             }
         }
+    }
+
+    /// Re-links copies whose source changed identity without changing, instead of deleting and recreating
+    /// them. Removing and re-adding an account regenerates every event's identifiers, so each copy's
+    /// recorded source looks deleted and the same event looks new; left alone, that deletes and recreates
+    /// every copy from the account and changes every one of their event IDs. A copy is re-linked only when
+    /// the match is exact and one-to-one (see `relinks`); anything else keeps the old delete-and-create.
+    /// The copy keeps its old fingerprint, so the normal update that follows refreshes it in place.
+    private func relinkOrphanedCopies(
+        orphans: [(event: EKEvent, metadata: BridgeEventMetadata)],
+        sourceEvents: [EKEvent],
+        claimedIdentities: Set<String>,
+        sourceCalendarKey: String,
+        destinationCalendarKey: String,
+        settings: BridgeSettings,
+        result: inout SyncResult
+    ) -> Set<String> {
+        guard !orphans.isEmpty else { return [] }
+        let sourceCalendarName = calendarDisplayName(for: sourceCalendarKey)
+        let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
+        let copyMode = settings.transform.copyAsFreeBusyOnly ? "freeBusy" : "details"
+        func identity(of event: EKEvent) -> String {
+            BridgeEventMetadata.makeSourceIdentity(
+                sourceCalendarName: sourceCalendarName,
+                sourceEventExternalIdentifier: event.calendarItemExternalIdentifier,
+                sourceEventIdentifier: event.eventIdentifier,
+                sourceStartDate: event.startDate
+            )
+        }
+        // Only sources that would get a copy and do not have one yet can be the other half of a pair.
+        let unclaimed = sourceEvents.filter { source in
+            if claimedIdentities.contains(identity(of: source)) { return false }
+            if settings.skipBridgeCreatedSourceEvents, BridgeEventMetadata.parse(from: source.notes) != nil { return false }
+            if settings.skipWhenSourceOriginMatchesDestination,
+               sourceOriginMatchesDestination(sourceEvent: source, sourceCalendarKey: sourceCalendarKey,
+                                              destinationCalendarKey: destinationCalendarKey) { return false }
+            return true
+        }
+        let sourcesByID = Dictionary(unclaimed.map { ($0.eventIdentifier ?? $0.calendarItemIdentifier, $0) },
+                                     uniquingKeysWith: { first, _ in first })
+        let orphansByID = Dictionary(orphans.map { ($0.event.eventIdentifier ?? $0.event.calendarItemIdentifier, $0) },
+                                     uniquingKeysWith: { first, _ in first })
+        let pairs = Self.relinks(
+            orphans: orphansByID.map { id, copy in
+                RelinkCandidate(id: id, title: copy.event.title ?? "", startDate: copy.event.startDate,
+                                endDate: copy.event.endDate, isAllDay: copy.event.isAllDay)
+            },
+            sources: sourcesByID.map { id, source in
+                RelinkCandidate(
+                    id: id,
+                    title: settings.transform.destinationTitle(
+                        for: source.title ?? "",
+                        sourceCalendarName: sourceCalendarName,
+                        originCalendarName: originCalendarName(forSourceEvent: source, sourceCalendarKey: sourceCalendarKey)
+                    ),
+                    startDate: source.startDate, endDate: source.endDate, isAllDay: source.isAllDay)
+            }
+        )
+
+        var relinked = Set<String>()
+        for pair in pairs {
+            guard let copy = orphansByID[pair.orphan], let source = sourcesByID[pair.source] else { continue }
+            let sourceIdentity = identity(of: source)
+            let copyID = BridgeEventMetadata.makeCopyID(
+                sourceIdentity: sourceIdentity,
+                destinationCalendarName: destinationCalendarName,
+                copyMode: copyMode
+            )
+            let metadata = metadataForCopy(
+                copyID: copyID,
+                sourceIdentity: sourceIdentity,
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName,
+                originCalendarName: originCalendarName(forSourceEvent: source, sourceCalendarKey: sourceCalendarKey) ?? sourceCalendarName,
+                originCalendarKey: originCalendarKey(forSourceEvent: source, fallback: sourceCalendarKey),
+                copyMode: copyMode,
+                fingerprint: copy.metadata.fingerprint,
+                sourceEvent: source,
+                transform: settings.transform
+            )
+            result.previews.append(SyncEventPreview(
+                id: copyID,
+                sourceTitle: source.title ?? "Untitled",
+                destinationTitle: copy.event.title,
+                startDate: source.startDate,
+                action: .update,
+                message: settings.dryRun
+                    ? "Would re-link copy to its source, whose identifiers changed (for example, the account was re-added)"
+                    : "Re-linked copy to its source, whose identifiers changed (for example, the account was re-added)",
+                sourceCalendarName: sourceCalendarName,
+                destinationCalendarName: destinationCalendarName
+            ))
+            relinked.insert(pair.orphan)
+            if settings.dryRun {
+                dryRunRelinks[copyID] = copy.event
+                continue
+            }
+            copy.event.notes = BridgeEventMetadata.notesByAddingMarker(to: copy.event.notes, metadata: metadata)
+            do {
+                try store.save(copy.event, span: .thisEvent, commit: true)
+                ledger.removeMappings(destinationCalendarKey: destinationCalendarKey,
+                                      destinationEventIdentifier: copy.event.eventIdentifier)
+            } catch {
+                relinked.remove(pair.orphan)
+                result.failed += 1
+                result.previews.append(SyncEventPreview(
+                    id: copyID,
+                    sourceTitle: source.title ?? "Untitled",
+                    destinationTitle: copy.event.title,
+                    startDate: source.startDate,
+                    action: .error,
+                    message: "Re-link failed: \(error.localizedDescription)",
+                    sourceCalendarName: sourceCalendarName,
+                    destinationCalendarName: destinationCalendarName
+                ))
+            }
+        }
+        return relinked
+    }
+
+    public struct RelinkCandidate: Equatable, Sendable {
+        public var id: String
+        /// For a copy, its title; for a source, the title its copy would be given.
+        public var title: String
+        public var startDate: Date
+        public var endDate: Date
+        public var isAllDay: Bool
+
+        public init(id: String, title: String, startDate: Date, endDate: Date, isAllDay: Bool) {
+            self.id = id
+            self.title = title
+            self.startDate = startDate
+            self.endDate = endDate
+            self.isAllDay = isAllDay
+        }
+    }
+
+    /// Pairs orphaned copies with sources that are the same event under new identifiers. A pair is made only
+    /// on an exact match — the title the copy would have, start, end and all-day — and only one-to-one: an
+    /// orphan with two candidates, or a candidate two orphans want, is left to delete-and-create, because
+    /// guessing between two real events is worse than recreating one.
+    public static func relinks(orphans: [RelinkCandidate], sources: [RelinkCandidate]) -> [(orphan: String, source: String)] {
+        func key(_ candidate: RelinkCandidate) -> String {
+            [candidate.title,
+             String(format: "%.0f", candidate.startDate.timeIntervalSince1970),
+             String(format: "%.0f", candidate.endDate.timeIntervalSince1970),
+             candidate.isAllDay ? "allDay" : "timed"].joined(separator: "\u{1f}")
+        }
+        let orphansByKey = Dictionary(grouping: orphans, by: key)
+        let sourcesByKey = Dictionary(grouping: sources, by: key)
+        return orphansByKey.compactMap { key, group -> (orphan: String, source: String)? in
+            guard group.count == 1, let candidates = sourcesByKey[key], candidates.count == 1 else { return nil }
+            return (group[0].id, candidates[0].id)
+        }
+        .sorted { $0.orphan < $1.orphan }
     }
 
     private func deleteDestinationCopy(
@@ -1412,28 +1587,50 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         sourceCalendarKey: String,
         destinationCalendarKey: String
     ) -> Bool {
-        if let origin = ledger.mappingForDestinationEvent(
-            calendarKey: sourceCalendarKey,
-            eventIdentifier: sourceEvent.eventIdentifier
-        )?.sourceCalendarKey {
+        // The marker names the origin by calendar name, which survives an account being removed and
+        // re-added; the ledger records a calendar key, which does not. Either one saying "this came from
+        // the destination" is enough: a missing busy block is recoverable, a block echoing an account's
+        // own event back onto it is not.
+        if let metadata = BridgeEventMetadata.parse(from: sourceEvent.notes) {
+            let destinationName = calendarDisplayName(for: destinationCalendarKey)
+            let destinationKeyHash = EventFingerprint.hash(parts: [destinationCalendarKey])
+            if BridgeEventMetadata.storedName(metadata.originCalendarName, matches: destinationName)
+                || metadata.originCalendarKeyHash == destinationKeyHash {
+                return true
+            }
+        }
+        if let origin = liveLedgerOriginKey(forSourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey) {
             return origin == destinationCalendarKey
         }
-
-        guard let metadata = BridgeEventMetadata.parse(from: sourceEvent.notes) else {
-            return false
-        }
-
-        let destinationName = calendarDisplayName(for: destinationCalendarKey)
-        let destinationKeyHash = EventFingerprint.hash(parts: [destinationCalendarKey])
-        return BridgeEventMetadata.storedName(metadata.originCalendarName, matches: destinationName)
-            || metadata.originCalendarKeyHash == destinationKeyHash
+        return false
     }
 
     private func originCalendarKey(forSourceEvent sourceEvent: EKEvent, fallback sourceCalendarKey: String) -> String {
-        ledger.mappingForDestinationEvent(
-            calendarKey: sourceCalendarKey,
-            eventIdentifier: sourceEvent.eventIdentifier
-        )?.sourceCalendarKey ?? sourceCalendarKey
+        if let key = liveLedgerOriginKey(forSourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey) {
+            return key
+        }
+        if let name = markerOriginName(of: sourceEvent),
+           let key = calendars().first(where: { $0.displayName == name })?.stableKey {
+            return key
+        }
+        return sourceCalendarKey
+    }
+
+    /// Where the ledger says a copy came from — but only if that calendar still exists. The ledger stores
+    /// calendar keys, and removing and re-adding an account gives its calendars new keys. A stale key names
+    /// nothing; trusting it made an account's own events look foreign and sent them back to it as busy
+    /// blocks, and made the raw key string stand in for the origin's name (2026-09-21).
+    private func liveLedgerOriginKey(forSourceEvent sourceEvent: EKEvent, sourceCalendarKey: String) -> String? {
+        let live = Set(calendars().map(\.stableKey))
+        return ledger.mappingsForDestinationEvent(calendarKey: sourceCalendarKey, eventIdentifier: sourceEvent.eventIdentifier)
+            .map(\.sourceCalendarKey)
+            .first { live.contains($0) }
+    }
+
+    private func markerOriginName(of event: EKEvent) -> String? {
+        BridgeEventMetadata.parse(from: event.notes).flatMap {
+            BridgeEventMetadata.resolveStoredName($0.originCalendarName, among: calendars().map(\.displayName))
+        }
     }
 
     private func upsertLedgerMapping(
@@ -1457,15 +1654,10 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func originCalendarName(forSourceEvent sourceEvent: EKEvent, sourceCalendarKey: String) -> String? {
-        guard let originKey = ledger.mappingForDestinationEvent(
-            calendarKey: sourceCalendarKey,
-            eventIdentifier: sourceEvent.eventIdentifier
-        )?.sourceCalendarKey else {
-            return BridgeEventMetadata.parse(from: sourceEvent.notes).flatMap {
-                BridgeEventMetadata.resolveStoredName($0.originCalendarName, among: calendars().map(\.displayName))
-            }
+        if let key = liveLedgerOriginKey(forSourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey) {
+            return calendarDisplayName(for: key)
         }
-        return calendarDisplayName(for: originKey)
+        return markerOriginName(of: sourceEvent)
     }
 
     private func calendarDisplayName(for key: String) -> String {

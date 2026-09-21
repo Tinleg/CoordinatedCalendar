@@ -39,6 +39,8 @@ enum CommandLineBridge {
             switch options.command {
             case "list-calendars":
                 return listCalendars(engine: engine)
+            case "list-events":
+                return listEvents(options: options, engine: engine)
             case "copy":
                 return await copy(options: options, engine: engine)
             case "delete":
@@ -87,6 +89,35 @@ enum CommandLineBridge {
             print("\(calendar.stableKey)\t\(calendar.displayName)\t\(writable)\tsource: \(calendar.sourceType)\t\(availability)")
         }
         return 0
+    }
+
+    /// Read-only: what EventKit hands the app for one calendar, with the identifiers identity is
+    /// built from. For diagnosing sync problems without writing anything.
+    private static func listEvents(options: CLIOptions, engine: CoordinatedCalendarEngine) -> Int32 {
+        do {
+            let identity = try resolveCalendar(options.requiredValue("from"), engine: engine)
+            guard let calendar = engine.calendar(for: identity.stableKey) else {
+                throw CLIError.message("Calendar \(identity.displayName) is not available.")
+            }
+            let iso = ISO8601DateFormatter()
+            let events = engine.events(from: try startDate(options: options), to: try endDate(options: options),
+                                       calendars: [calendar])
+            for event in events.sorted(by: { $0.startDate < $1.startDate }) {
+                let marker = BridgeEventMetadata.parse(from: event.notes)
+                print([
+                    iso.string(from: event.startDate),
+                    event.title ?? "Untitled",
+                    "external: \(event.calendarItemExternalIdentifier ?? "none")",
+                    "recurring: \(event.hasRecurrenceRules ? "yes" : "no")",
+                    marker.map { "marker: \($0.copyMode)" } ?? "marker: none",
+                    "copy of: \(marker?.sourceEventExternalID ?? "-")"
+                ].joined(separator: "\t"))
+            }
+            return 0
+        } catch {
+            fputs("\(error.localizedDescription)\n", stderr)
+            return 1
+        }
     }
 
     private static func copy(options: CLIOptions, engine: CoordinatedCalendarEngine) async -> Int32 {
@@ -577,6 +608,7 @@ private struct CLIOptions {
         "health-check",
         "install-sync-agent",
         "list-calendars",
+        "list-events",
         "remove-all-copies",
         "copy",
         "delete",
@@ -617,6 +649,7 @@ CoordinatedCalendar script mode
 
 Commands:
   --list-calendars
+  --list-events --from CAL [--start D] [--end D]   Read-only: events with the identifiers identity is built from
   --copy --from CAL --to CAL [--execute] [--free-busy]
   --delete --from CAL --to CAL [--execute]
   --fan-in --to CONSOLIDATED [--from CAL ...] [--execute]
