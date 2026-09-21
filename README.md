@@ -95,12 +95,29 @@ For this to hold:
 - Point every Mac at the same consolidated calendar and the same contributors and recipients.
 - If two Macs pick up a brand-new event before their calendars have synced, each can create a copy. CoordinatedCalendar removes the extra automatically on its next run, once the copies have synced. Copies of the same source event share a copy ID, and every Mac keeps the same one: the earliest created, with ties broken by the event's cross-device identifier. This check only ever considers CoordinatedCalendar's own copies.
 
+## If Calendar Is Missing Events
+
+If an Exchange or Microsoft 365 calendar shows events on the web that the Mac's Calendar app does not — often recurring meetings — the Mac's local copy of that account has fallen behind. `--list-events` confirms it from the Mac's side. The usual fix is **System Settings → Internet Accounts → that account → turn Calendars off, wait a minute, turn it back on**, which re-downloads everything.
+
+Two things to do around it:
+
+1. **Pause syncing first**: on the Status page, **Remove Background Jobs**. While the account is off, its events briefly vanish, and a sync in that gap would treat them all as deleted.
+2. **Re-select the calendar afterwards.** macOS gives a re-added account's calendars new identifiers, so it appears unchecked on the Calendars page. Tick it again on both sides, preview a sync, then **Submit Background Jobs** to resume.
+
+The app handles the rest: macOS also regenerates the events' identifiers, and existing copies are re-linked to them in place rather than deleted and recreated.
+
 ## Script Mode
 
 Use the packaged app binary for automation so macOS Calendar permission stays attached to the same bundle identity:
 
 ```bash
 .build/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar --list-calendars
+```
+
+See exactly what EventKit hands the app for one calendar, with the identifiers each copy's identity is built from. It is read-only, and is the first thing to run when a calendar seems to be missing events:
+
+```bash
+.build/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar --list-events --from "Work / Calendar" --start 2026-09-01 --end 2026-10-01
 ```
 
 Copy one calendar to another as a dry run:

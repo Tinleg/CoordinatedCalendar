@@ -56,7 +56,7 @@ Several Macs can run the app without duplicating copies, but running the schedul
 When one account fails (expired sign-in, server down), other routes still run and the failure is reported. A per-route "last success" on the Status page would make partial outages clearer.
 
 ### Calendar renames
-Copy identities include calendar display names, so renaming a calendar (or an account in Calendar settings) makes its existing copies look foreign: they're removed and recreated. A rename-aware migration could match old and new names by stable key on the Mac where the rename happened, and rewrite markers in place.
+Copy identities include calendar display names, so renaming a calendar (or an account in Calendar settings) makes its existing copies look foreign: they're removed and recreated. A rename-aware migration could match old and new names by stable key on the Mac where the rename happened, and rewrite markers in place. (The opposite case — same names, new keys and event identifiers, which is what re-adding an account produces — is handled as of 0.2.0; see DESIGN-DECISIONS.md.)
 
 ## Code health
 

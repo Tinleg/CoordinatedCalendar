@@ -1,13 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
-- **Recurring events no longer rewrite their copies on every sync.** A recurrence rule's description, which the fingerprint included, begins with the rule object's memory address, so it differed in every run and every copy of a recurring event was updated every five minutes. The fingerprint now uses the rule without the address. Existing copies of recurring events are updated once more, then settle.
-- **Surviving an account being removed and re-added.** macOS gives a re-added account's calendars new identifiers and regenerates its events' identifiers. The app now copes with both: it no longer sends that account's own events back to it as busy blocks, and instead of deleting and recreating every copy it made from that account (changing all of their event IDs), it re-links each copy to its source in place when the match is exact — same title, start, end and all-day, one-to-one. Anything ambiguous still falls back to delete-and-create.
-- New read-only `--list-events --from CAL` command, showing each event's identifiers, for diagnosing sync problems.
-- `package-app.sh` always rebuilds; it previously reused an existing release binary, which could package a stale build.
+**Behavior change:** full-detail copies in the consolidated calendar now carry their source event's identifiers and source calendar name in the clear (see below). Anything that reads the consolidated calendar's notes will see new marker fields; busy blocks on other calendars are unchanged.
 
 - **Full-detail copies now name their source event in the clear.** A copy in your consolidated calendar carries the source event's identifier, its cross-device identifier and the source calendar's display name in its marker, so a tool reading the consolidated calendar can match a copy to the event it came from exactly instead of guessing by title and time. The consolidated calendar is your own hub; **free/busy copies are unchanged and still reveal nothing**, and a busy block found carrying a source reference is treated as a violation and stripped. Existing consolidated copies gain the reference the next time they sync, updated in place, so their event IDs do not change.
+- **Surviving an account being removed and re-added.** macOS gives a re-added account's calendars new identifiers and regenerates its events' identifiers. The app now copes with both: it no longer sends that account's own events back to it as busy blocks, and instead of deleting and recreating every copy it made from that account (changing all of their event IDs), it re-links each copy to its source in place when the match is exact — same title, start, end and all-day, one-to-one. Anything ambiguous still falls back to delete-and-create.
+- **Recurring events no longer rewrite their copies on every sync.** A recurrence rule's description, which the fingerprint included, begins with the rule object's memory address, so it differed in every run and every copy of a recurring event was updated every five minutes. The fingerprint now uses the rule without the address. Existing copies of recurring events are updated once more, then settle.
+- New read-only `--list-events --from CAL` command, showing each event's identifiers, for diagnosing sync problems.
+- `package-app.sh` always rebuilds; it previously reused an existing release binary, which could package a stale build.
 
 ## 0.1.2
 

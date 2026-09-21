@@ -48,6 +48,16 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 **Why and cost:** changing it changes every copy's ID, which would make the app treat every existing copy as foreign, delete and recreate them, and change their event IDs. Any future change must be a two-phase migration: ship a build that recognizes both namespaces and rewrites markers in place, confirm nothing old remains, then remove the old namespace. That is how the namespace was changed once already.
 
+## Survive an account being removed and re-added
+
+**Decision:** trust the ledger's calendar keys only while those calendars exist, fall back to the marker's calendar names, and re-link a copy to its source in place when the source is plainly the same event under new identifiers.
+
+**Why:** removing and re-adding an account is the standard fix when macOS Calendar drops events, and it changes both the account's calendar keys and every event's identifiers. Before this, the app treated the account's own events as foreign — putting a busy block on top of each of them, in a calendar other people can see — and deleted and recreated every copy it had made from that account, changing their event IDs.
+
+**The re-link rule is deliberately narrow:** an exact match on the title the copy would have, start, end and all-day, and one-to-one on both sides. Two real events with the same title and times would be a guess, and recreating one copy is better than attaching it to the wrong event.
+
+**Still true:** the calendar has to be re-selected in the app afterwards, because settings are keyed by calendar key.
+
 ## Copy occurrences, never recurrence rules
 
 **Decision:** EventKit expands recurring events, and each occurrence is copied as a single event. Copies never get recurrence rules; full-detail copies describe the rule in `Source details:`.
@@ -65,6 +75,8 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 **Decision:** new inputs to the fingerprint (`place:`, `details:`, `notes:verbatim`) are added only when the source has them.
 
 **Why:** a new fingerprint part would otherwise change every copy's fingerprint and rewrite every copy once. Appending conditionally limits a feature rollout to the copies it actually affects. A test pins the fingerprint of a plain event so this stays true.
+
+**And every part must be the same in every run.** A recurrence rule's description begins with the object's memory address, which differs per process; hashing it made every recurring event's copy rewrite on every sync. Anything added to the fingerprint has to be checked for this: build it twice in one process and compare.
 
 ## Unsupported availability is left unset, and the intent is kept in the marker
 
