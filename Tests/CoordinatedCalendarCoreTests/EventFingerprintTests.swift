@@ -129,3 +129,27 @@ private func placeTestFingerprint(_ event: EKEvent, transform: TransformSettings
         )
     }
 }
+
+@Test func aRecurringEventHasTheSameFingerprintEveryTime() {
+    // Two rule objects for the same rule live at two addresses, as they do in two sync runs.
+    let store = EKEventStore()
+    func weeklyOnFriday() -> EKEvent {
+        let event = EKEvent(eventStore: store)
+        event.title = "Weekly sync"
+        event.startDate = Date(timeIntervalSince1970: 1_800_000_000)
+        event.endDate = Date(timeIntervalSince1970: 1_800_001_800)
+        event.addRecurrenceRule(EKRecurrenceRule(
+            recurrenceWith: .weekly, interval: 1, daysOfTheWeek: [EKRecurrenceDayOfWeek(.friday)],
+            daysOfTheMonth: nil, monthsOfTheYear: nil, weeksOfTheYear: nil, daysOfTheYear: nil,
+            setPositions: nil, end: nil))
+        return event
+    }
+    let first = weeklyOnFriday(), second = weeklyOnFriday()
+    #expect(first.recurrenceRules?.first?.description != second.recurrenceRules?.first?.description,
+            "the raw descriptions differ by address, which is the whole problem")
+    #expect(EventFingerprint.fingerprint(event: first, sourceCalendarKey: "godlan")
+            == EventFingerprint.fingerprint(event: second, sourceCalendarKey: "godlan"))
+    let stable = EventFingerprint.stableDescription(of: first.recurrenceRules![0])
+    #expect(!stable.contains("0x") && stable.hasSuffix("RRULE FREQ=WEEKLY;INTERVAL=1;BYDAY=FR"),
+            "the rule itself is kept; only the address goes")
+}

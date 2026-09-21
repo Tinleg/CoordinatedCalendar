@@ -40,8 +40,16 @@ public enum EventFingerprint {
             isAllDay: event.isAllDay,
             location: event.location,
             url: event.url,
-            recurrenceRuleDescriptions: event.recurrenceRules?.map(\.description) ?? []
+            recurrenceRuleDescriptions: event.recurrenceRules?.map(stableDescription(of:)) ?? []
         )
+    }
+
+    /// The rule without the object's memory address. `EKRecurrenceRule.description` begins with it —
+    /// "EKRecurrenceRule <0x10e342e60> RRULE FREQ=WEEKLY;…" — and the address differs in every process,
+    /// so hashing it made every recurring event's fingerprint change on every run and its copy was
+    /// rewritten every five minutes (found 2026-09-21, when Godlan's recurring meetings came back).
+    public static func stableDescription(of rule: EKRecurrenceRule) -> String {
+        rule.description.replacingOccurrences(of: #"<0x[0-9a-fA-F]+>\s*"#, with: "", options: .regularExpression)
     }
 
     public static func fingerprint(
