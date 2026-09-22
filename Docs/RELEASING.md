@@ -51,7 +51,15 @@ The version lives in `Packaging/Info.plist`: `CFBundleShortVersionString` is the
    gh release create vX.Y.Z --title "CoordinatedCalendar X.Y.Z" --latest --notes "..."
    ```
 
-8. **Social preview:** if the preview image changed, upload `Docs/images/social-preview.png` in the repository's Settings > General > Social preview. It's a repository setting, not part of the release.
+8. **Disk image:** build it from the tagged commit and attach it to the release:
+
+   ```bash
+   COORDINATEDCALENDAR_NOTARY_PROFILE=<profile> ./scripts/make-dmg.sh
+   gh release upload vX.Y.Z dist/CoordinatedCalendar-X.Y.Z.dmg
+   ```
+
+   The script says whether the image is Developer ID signed and notarized. **Attach only an image that is both**: anything less is blocked by default on other people's Macs. Notarization needs a "Developer ID Application" certificate in the keychain and credentials stored once with `xcrun notarytool store-credentials <profile>`. The first run asks to let the terminal control Finder, which lays out the window; without it the image still works, with Finder's default window. If the background art changes, run `swift scripts/generate-dmg-background.swift`; its geometry must match `make-dmg.sh`.
+9. **Social preview:** if the preview image changed, upload `Docs/images/social-preview.png` in the repository's Settings > General > Social preview. It's a repository setting, not part of the release.
 
 ## Rules
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Disk image builds.** `scripts/make-dmg.sh` produces `dist/CoordinatedCalendar-<version>.dmg` with the familiar "drag to Applications" window. It signs with a Developer ID certificate and notarizes when those credentials exist, and reports plainly when they don't.
 - **Background syncing can only be turned on from an Applications folder.** If the app was opened straight from a download, from its disk image, from a temporary folder or from anywhere else, it says so on the Status page from launch and explains how to move it, instead of installing background jobs that would break when that copy moves or disappears. The older `--install-agent` command now goes through the same check; it previously skipped it.
 - The app is now signed with the **hardened runtime** and declares the Calendar entitlement it needs under it. Nothing changes in use; this is the prerequisite for a notarized download that installs without security warnings.
 

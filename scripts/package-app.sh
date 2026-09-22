@@ -3,7 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_ROOT="${COORDINATEDCALENDAR_SCRATCH:-$ROOT_DIR/.build}"
-APP_DIR="${COORDINATEDCALENDAR_APP_DIR:-$HOME/Applications/CoordinatedCalendar.app}"
+DEFAULT_APP_DIR="$HOME/Applications/CoordinatedCalendar.app"
+APP_DIR="${COORDINATEDCALENDAR_APP_DIR:-$DEFAULT_APP_DIR}"
 APP_LINK="$ROOT_DIR/.build/CoordinatedCalendar.app"
 # Assemble next to the destination, then swap it in, so a scheduled sync never finds a half-built app.
 STAGE_DIR="$(dirname "$APP_DIR")/.CoordinatedCalendar.app.staging"
@@ -39,12 +40,17 @@ SIGN_FLAGS=(--force --options runtime --entitlements "$ROOT_DIR/Packaging/Coordi
 
 if command -v codesign >/dev/null 2>&1; then
   if security find-identity -v -p codesigning 2>/dev/null | grep -F "$SIGN_IDENTITY" >/dev/null; then
-    codesign "${SIGN_FLAGS[@]}" --sign "$SIGN_IDENTITY" "$STAGE_DIR" >/dev/null
+    IDENTITY="$SIGN_IDENTITY"
   elif FIRST_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/valid identities found/{exit} /"/{print $2; exit}')" && [[ -n "$FIRST_IDENTITY" ]]; then
-    codesign "${SIGN_FLAGS[@]}" --sign "$FIRST_IDENTITY" "$STAGE_DIR" >/dev/null
+    IDENTITY="$FIRST_IDENTITY"
   else
-    codesign "${SIGN_FLAGS[@]}" --sign - "$STAGE_DIR" >/dev/null
+    IDENTITY="-"
   fi
+  # Notarization requires a secure timestamp, which only matters for (and only works with) Developer ID.
+  if [[ "$IDENTITY" == "Developer ID Application"* ]]; then
+    SIGN_FLAGS+=(--timestamp)
+  fi
+  codesign "${SIGN_FLAGS[@]}" --sign "$IDENTITY" "$STAGE_DIR" >/dev/null
 fi
 
 # Wait for a running scheduled sync (the GUI runs without arguments and is not waited on).
@@ -55,6 +61,10 @@ done
 rm -rf "$APP_DIR"
 mv "$STAGE_DIR" "$APP_DIR"
 
-mkdir -p "$ROOT_DIR/.build"
-rm -rf "$APP_LINK"
-ln -s "$APP_DIR" "$APP_LINK"
+# The development shortcut follows the installed app only. Building a copy elsewhere — a release build,
+# a test — used to re-point it at that copy.
+if [[ "$APP_DIR" == "$DEFAULT_APP_DIR" ]]; then
+  mkdir -p "$ROOT_DIR/.build"
+  rm -rf "$APP_LINK"
+  ln -s "$APP_DIR" "$APP_LINK"
+fi
