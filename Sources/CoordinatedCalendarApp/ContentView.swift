@@ -424,7 +424,7 @@ struct ContentView: View {
     private var permissionSection: some View {
         GroupBox("Calendar Access") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("CoordinatedCalendar needs full Calendar access to read events from your calendars and write copies. Everything stays on this Mac. The only thing the app ever contacts is GitHub, to check for a newer version, and only when you ask it to (see Updates below).")
+                Text("CoordinatedCalendar needs full Calendar access to read events from your calendars and write copies. Everything stays on this Mac. The only thing the app ever contacts is GitHub, to check for a newer version: once a week when the app is open, or when you ask (see Updates below, where the weekly check can be turned off).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 HStack {

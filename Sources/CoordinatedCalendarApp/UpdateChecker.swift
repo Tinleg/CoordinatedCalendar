@@ -2,7 +2,7 @@ import CoordinatedCalendarCore
 import Foundation
 
 /// Asks GitHub for the latest published release. This is the only network request the app makes, and only
-/// when the person clicks Check for Updates or has turned on the weekly check. It sends nothing about their
+/// when the person clicks Check for Updates, or once a week when the app is opened, unless they turn that off. It sends nothing about their
 /// calendars: the request is the public "latest release" address, and the answer is a version number.
 enum UpdateChecker {
     static let latestReleaseURL = URL(string: "https://api.github.com/repos/Tinleg/CoordinatedCalendar/releases/latest")!
@@ -21,9 +21,9 @@ enum UpdateChecker {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0"
     }
 
-    /// Off unless the person turns it on: the app otherwise never contacts anything.
+    /// On unless the person turns it off, so people hear about fixes without having to go looking.
     static var checksAutomatically: Bool {
-        get { UserDefaults.standard.bool(forKey: automaticKey) }
+        get { UserDefaults.standard.object(forKey: automaticKey) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: automaticKey) }
     }
 

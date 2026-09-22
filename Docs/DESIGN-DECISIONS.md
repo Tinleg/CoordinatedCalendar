@@ -130,8 +130,8 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 ## The update check asks, it never installs
 
-**Decision:** the only network request is an update check against GitHub's public releases API: on demand, or weekly if the user turns that on (off by default). A newer version is offered as a link to its release page; nothing is downloaded or replaced automatically.
+**Decision:** the only network request is an update check against GitHub's public releases API: on demand, and weekly while the app is open unless the user turns that off. A newer version is offered as a link to its release page; nothing is downloaded or replaced automatically.
 
-**Why:** people need to learn about fixes, but an app that reads every calendar on the Mac should not phone home unasked, and a self-updater (Sparkle) adds a framework, a signing key and an update feed to keep secure. The request carries only the app's name and version.
+**Why:** people need to learn about fixes, and most never click a Check button, so the weekly check is on. It can be turned off and never runs from the background jobs. It stops at a link because a self-updater (Sparkle) adds a framework, a signing key and an update feed to keep secure. The request carries only the app's name and version.
 
 **Cost:** updating is manual — download the new disk image and replace the app.
