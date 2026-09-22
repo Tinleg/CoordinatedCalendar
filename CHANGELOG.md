@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - **Download and install.** Releases now include `CoordinatedCalendar-<version>.dmg`: open it and drag the app to Applications. The app is signed and uses the hardened runtime but is not notarized by Apple, so the first launch needs **Open Anyway** in System Settings > Privacy & Security; the disk image window, the README and the release notes say so. Every release is signed with the same certificate, so the Calendar permission carries over when you update. Requires a Mac with Apple silicon.
 - **VoiceOver:** the recipient availability menus name their calendar, the column headers read as headers with their explanation, a background job's state is spoken (and shown on hover) instead of only coloured, and decorative lines and dots are skipped.
