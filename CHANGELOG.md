@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1
 
 - **Gathered events no longer alert twice.** A copy in the consolidated calendar is now written without the source event's alerts, so a meeting notifies you from its own calendar only. Alerts on existing copies are removed on the next sync, including ones an account added by itself. **Keep alerts on gathered events** in the Calendars page copies them after all; `--fan-in` takes `--keep-alerts`, and `--copy` takes `--no-alerts`. Busy blocks never carried alerts and still don't.
 
