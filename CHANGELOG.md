@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - **The disk image window is laid out again.** 0.3.1's image opened as a plain Finder window, without the drag-to-Applications arrow or the first-launch instructions: Finder was asked to style the window before it could see the background file, and the build went ahead anyway. The build now waits for the file, accepts whichever way of naming it Finder takes on the day, and refuses to produce an image without its window layout. The app itself is unchanged.
 
