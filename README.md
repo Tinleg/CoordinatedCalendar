@@ -15,7 +15,7 @@ To do that, it gathers every event into one consolidated calendar you choose, wh
 - Keeps both directions current: new, changed and deleted source events are reflected on the next run. A scheduled background job runs fan-in and then fan-out every few minutes (see [Automatic Runs](#automatic-runs)).
 - Adapts each copy to what its destination calendar supports, such as Exchange's Tentative status versus iCloud's Free/Busy only (see [Calendars With Different Capabilities](#calendars-with-different-capabilities)).
 - Also copies events within a date window from one source calendar to one writable destination calendar on request (`--copy`), with full details or as free/busy blocks.
-- Full-detail copies preserve title, dates, all-day status, timezone, location (including structured-location coordinates and radius), notes, URL, and alarms where EventKit permits. Each occurrence of a recurring event is copied as its own event, without recurrence rules. EventKit cannot write attendees, organizer or status onto a copy, so full-detail copies add a `Source details:` block to their notes (status when tentative or canceled, organizer, up to 50 attendees with their responses, and a plain-language repeat rule), placed before the CoordinatedCalendar marker.
+- Full-detail copies preserve title, dates, all-day status, timezone, location (including structured-location coordinates and radius), notes and URL where EventKit permits. Alerts are left off consolidated copies unless asked for (`--keep-alerts`, or the setting in the app), and busy blocks never carry any. Each occurrence of a recurring event is copied as its own event, without recurrence rules. EventKit cannot write attendees, organizer or status onto a copy, so full-detail copies add a `Source details:` block to their notes (status when tentative or canceled, organizer, up to 50 attendees with their responses, and a plain-language repeat rule), placed before the CoordinatedCalendar marker.
 - Supports title prefix/suffix, notes footer, and field-copy toggles.
 - Defaults to dry-run preview before writing.
 - Prevents duplicate copies with a durable mapping ledger and deterministic fingerprints.
@@ -73,7 +73,7 @@ The first time the app reads your calendars, macOS asks for Calendar access: cho
 1. **Create a consolidation calendar.** In the Calendar app, add a new calendar under any account, for example **File > New Calendar**, named `Consolidated`. Any writable account works. iCloud is a good choice because the full consolidated view then syncs to all your Apple devices, but the calendar holds full meeting details from every account, so pick an account where that is acceptable (see [What the consolidated calendar holds](#what-the-consolidated-calendar-holds)). Reserve it for CoordinatedCalendar: events you add to it directly are treated as your own and fan out as busy blocks too.
 2. **Install CoordinatedCalendar** (see [Install](#install)), open it and click **Grant Access** to give it full Calendar access.
 3. **Set up the pages in the sidebar.**
-   - **Calendars:** in the middle card, choose the **Consolidated** calendar you just created, then set the **Busy block title** (default `Busy - Other`) and whether to skip events marked Free and meetings you declined (both on by default). Hover over any of them for an explanation.
+   - **Calendars:** in the middle card, choose the **Consolidated** calendar you just created, then set the **Busy block title** (default `Busy - Other`), whether gathered events keep their alerts (off by default) and whether to skip events marked Free and meetings you declined (both on by default). Hover over any of them for an explanation.
      - On the left (**Fan-In**), check every calendar whose events should be gathered.
      - On the right (**Fan-Out**), check every calendar that should receive busy blocks, usually the same writable calendars. For each one, the availability picker keeps the source status (**Leave As-Is**) or forces Free, Busy or Tentative, limited to what that calendar supports.
      - Each calendar's row shows its account type, whether it's writable, and the statuses it supports. Curves show where events flow.
@@ -93,7 +93,7 @@ The consolidated calendar is your private, complete view, and it keeps full, rea
 - **Title:** the source calendar and the original title, such as `Work / Calendar: Quarterly Review`.
 - **Location:** the original location text, plus map coordinates when the source event has them.
 - **Notes:** the original notes in full, which for online meetings usually include join links, meeting IDs and passcodes. After them comes a `Source details:` block with the organizer and attendees (names, email addresses and responses), a tentative or canceled status, and the repeat rule.
-- **Also:** the URL, alarms and free/busy status.
+- **Also:** the URL and free/busy status. **Not alerts:** a gathered copy carries none, so a meeting doesn't notify you again from the consolidated calendar; the original event still alerts as it always did. Turn on **Keep alerts on gathered events** in the Calendars page to copy them after all.
 
 Only the last line of the notes, the CoordinatedCalendar marker, is encoded. In the consolidated calendar it also names the source event and its calendar in the clear, so tools that read your hub can tell exactly which event a copy came from. The busy blocks on your other calendars carry none of these details: their markers hold nothing but hashes, and a busy block found naming its source is stripped on the next run.
 
@@ -287,7 +287,7 @@ Because the resolved availability is part of each copy's fingerprint, a status c
 ### Other per-account differences
 
 - **Private flag:** free/busy copies are marked private only when EventKit reports that the destination event allows privacy changes. Elsewhere the flag is skipped, and the copy still carries only its busy title and times.
-- **Default alerts:** some accounts add their default alert to newly created events. Fan-out copies must have no alarms, so every fan-out run removes alerts from CoordinatedCalendar's own copies, whatever the account added.
+- **Default alerts:** some accounts add their default alert to newly created events. Copies must not alert, so every run removes alerts from CoordinatedCalendar's own copies — busy blocks always, consolidated copies unless **Keep alerts on gathered events** is on — whatever the account added.
 - **Read-only fields:** EventKit cannot write attendees, organizer or meeting status on any account type. Full-detail copies carry them in a `Source details:` notes block instead.
 - **Recurrence:** accounts expand recurring series differently, so CoordinatedCalendar copies each occurrence as its own event and never writes recurrence rules. A rule on a copied occurrence would expand into phantom events on the destination.
 - **Read-only calendars:** subscribed and birthday calendars can be fan-in sources but are never fan-out targets, and `--copy` refuses them as destinations.

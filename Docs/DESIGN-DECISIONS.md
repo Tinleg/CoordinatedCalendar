@@ -60,6 +60,14 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 **A moved event is followed, not replaced.** A copy's identity includes its source's start, because that is what tells a recurring series' occurrences apart. On its own that made a moved meeting look deleted and new. A non-recurring event keeps its identifier when it moves, so the ledger mapping for it is moved to the new start and the copy is updated in place. It needs the ledger: a Mac that never saw the copy replaces it.
 
+## A copy never alerts
+
+**Decision:** copies are written with no alerts — busy blocks always, consolidated copies unless the person turns alerts back on — and alerts found on a copy are removed on the next run.
+
+**Why:** the source event already alerts in its own calendar. A copy that alerts too notifies twice for one meeting, from a calendar the person does not work in, and on every Mac and phone that sees it. Some accounts also add a default alert to every new event, which is why this is enforced on the copy rather than only set when the copy is written.
+
+**Cost:** someone who wants the consolidated calendar to be the one they watch has to turn alerts back on; the setting applies to the whole hub, not per calendar.
+
 ## Copy occurrences, never recurrence rules
 
 **Decision:** EventKit expands recurring events, and each occurrence is copied as a single event. Copies never get recurrence rules; full-detail copies describe the rule in `Source details:`.

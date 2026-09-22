@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Gathered events no longer alert twice.** A copy in the consolidated calendar is now written without the source event's alerts, so a meeting notifies you from its own calendar only. Alerts on existing copies are removed on the next sync, including ones an account added by itself. **Keep alerts on gathered events** in the Calendars page copies them after all; `--fan-in` takes `--keep-alerts`, and `--copy` takes `--no-alerts`. Busy blocks never carried alerts and still don't.
+
 ## 0.3.0
 
 - **Download and install.** Releases now include `CoordinatedCalendar-<version>.dmg`: open it and drag the app to Applications. The app is signed and uses the hardened runtime but is not notarized by Apple, so the first launch needs **Open Anyway** in System Settings > Privacy & Security; the disk image window, the README and the release notes say so. Every release is signed with the same certificate, so the Calendar permission carries over when you update. Requires a Mac with Apple silicon.

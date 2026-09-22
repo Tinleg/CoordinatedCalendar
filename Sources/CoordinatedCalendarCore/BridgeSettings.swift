@@ -23,6 +23,9 @@ public struct TransformSettings: Codable, Equatable, Sendable {
     public var copyLocation: Bool
     public var copyNotes: Bool
     public var copyURL: Bool
+    /// Copies the source event's alerts. Off for consolidated copies: an alert on a copy fires a second
+    /// time for the same meeting, from a calendar the person does not work in.
+    public var copyAlarms: Bool
     public var copyAsFreeBusyOnly: Bool
     public var freeBusyTitle: String
     public var markFreeBusyEventsPrivate: Bool
@@ -37,6 +40,7 @@ public struct TransformSettings: Codable, Equatable, Sendable {
         copyLocation: Bool = true,
         copyNotes: Bool = true,
         copyURL: Bool = true,
+        copyAlarms: Bool = true,
         copyAsFreeBusyOnly: Bool = false,
         freeBusyTitle: String = "Busy",
         markFreeBusyEventsPrivate: Bool = true,
@@ -50,6 +54,7 @@ public struct TransformSettings: Codable, Equatable, Sendable {
         self.copyLocation = copyLocation
         self.copyNotes = copyNotes
         self.copyURL = copyURL
+        self.copyAlarms = copyAlarms
         self.copyAsFreeBusyOnly = copyAsFreeBusyOnly
         self.freeBusyTitle = freeBusyTitle
         self.markFreeBusyEventsPrivate = markFreeBusyEventsPrivate
@@ -65,6 +70,7 @@ public struct TransformSettings: Codable, Equatable, Sendable {
         case copyLocation
         case copyNotes
         case copyURL
+        case copyAlarms
         case copyAsFreeBusyOnly
         case freeBusyTitle
         case markFreeBusyEventsPrivate
@@ -82,6 +88,7 @@ public struct TransformSettings: Codable, Equatable, Sendable {
             copyLocation: try container.decodeIfPresent(Bool.self, forKey: .copyLocation) ?? true,
             copyNotes: try container.decodeIfPresent(Bool.self, forKey: .copyNotes) ?? true,
             copyURL: try container.decodeIfPresent(Bool.self, forKey: .copyURL) ?? true,
+            copyAlarms: try container.decodeIfPresent(Bool.self, forKey: .copyAlarms) ?? true,
             copyAsFreeBusyOnly: try container.decodeIfPresent(Bool.self, forKey: .copyAsFreeBusyOnly) ?? false,
             freeBusyTitle: try container.decodeIfPresent(String.self, forKey: .freeBusyTitle) ?? "Busy",
             markFreeBusyEventsPrivate: try container.decodeIfPresent(Bool.self, forKey: .markFreeBusyEventsPrivate) ?? true,
@@ -177,13 +184,24 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
 /// engine tests run them, so what is tested is what runs.
 extension BridgeSettings {
     /// A contributor's events into the consolidated calendar, with full details.
-    public static func fanIn(sourceKey: String, consolidatedKey: String, startDate: Date, endDate: Date, dryRun: Bool) -> BridgeSettings {
+    public static func fanIn(
+        sourceKey: String,
+        consolidatedKey: String,
+        copyAlarms: Bool = false,
+        startDate: Date,
+        endDate: Date,
+        dryRun: Bool
+    ) -> BridgeSettings {
         BridgeSettings(
             sourceCalendarKey: sourceKey,
             destinationCalendarKey: consolidatedKey,
             startDate: startDate,
             endDate: endDate,
-            transform: TransformSettings(includeSourceCalendarInTitle: true, destinationAvailability: .preserve),
+            transform: TransformSettings(
+                copyAlarms: copyAlarms,
+                includeSourceCalendarInTitle: true,
+                destinationAvailability: .preserve
+            ),
             dryRun: dryRun,
             updateExistingCopies: true,
             skipBridgeCreatedSourceEvents: true,
@@ -210,6 +228,8 @@ extension BridgeSettings {
             startDate: startDate,
             endDate: endDate,
             transform: TransformSettings(
+                // Busy blocks never alert: they are not the person's own copy of the meeting.
+                copyAlarms: false,
                 copyAsFreeBusyOnly: true,
                 freeBusyTitle: title,
                 destinationAvailability: availability

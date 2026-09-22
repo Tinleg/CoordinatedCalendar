@@ -23,6 +23,7 @@ final class BridgeViewModel: ObservableObject {
     @Published var contributorAvailabilities: [String: DestinationAvailability] = [:]
     @Published var recipientAvailabilities: [String: DestinationAvailability] = [:]
     @Published var fanOutTitle = FreeBusyCompliance.fanOutTitle
+    @Published var keepAlertsInConsolidated = false
     @Published var skipFreeEvents = true
     @Published var skipDeclinedEvents = true
     @Published var syncInterval = 300
@@ -373,6 +374,11 @@ final class BridgeViewModel: ObservableObject {
         saveGUISettings()
     }
 
+    func setKeepAlertsInConsolidated(_ keep: Bool) {
+        keepAlertsInConsolidated = keep
+        saveGUISettings()
+    }
+
     func setSkipFreeEvents(_ skip: Bool) {
         skipFreeEvents = skip
         saveGUISettings()
@@ -578,6 +584,7 @@ final class BridgeViewModel: ObservableObject {
             contributorAvailabilities = stored.contributorAvailabilities ?? [:]
             recipientAvailabilities = stored.recipientAvailabilities ?? [:]
             fanOutTitle = stored.effectiveFanOutTitle
+            keepAlertsInConsolidated = stored.keepAlertsInConsolidated ?? false
             skipFreeEvents = stored.skipFreeEvents ?? true
             skipDeclinedEvents = stored.skipDeclinedEvents ?? true
             syncInterval = stored.effectiveSyncInterval
@@ -627,6 +634,7 @@ final class BridgeViewModel: ObservableObject {
             fanOutTitle: fanOutTitle,
             skipFreeEvents: skipFreeEvents,
             skipDeclinedEvents: skipDeclinedEvents,
+            keepAlertsInConsolidated: keepAlertsInConsolidated,
             syncInterval: syncInterval,
             calendarNames: calendarNames,
             windowDaysPast: syncWindow.daysPast,

@@ -20,6 +20,8 @@ struct GUISettings: Codable, Equatable {
     var skipFreeEvents: Bool?
     /// Fan-out leaves out meetings you declined; nil means true.
     var skipDeclinedEvents: Bool?
+    /// Gathered events keep their alerts in the consolidated calendar; nil means false (alerts stripped).
+    var keepAlertsInConsolidated: Bool?
     /// How often the background sync runs, in seconds; nil falls back to the shortest per-calendar interval.
     var syncInterval: Int?
     /// The display name each selected calendar key had when last seen. Names survive an account being removed
@@ -116,7 +118,8 @@ extension GUISettings {
     }
 
     func fanInSettings(sourceKey: String, consolidatedKey: String, startDate: Date, endDate: Date, dryRun: Bool) -> BridgeSettings {
-        .fanIn(sourceKey: sourceKey, consolidatedKey: consolidatedKey, startDate: startDate, endDate: endDate, dryRun: dryRun)
+        .fanIn(sourceKey: sourceKey, consolidatedKey: consolidatedKey, copyAlarms: keepAlertsInConsolidated ?? false,
+               startDate: startDate, endDate: endDate, dryRun: dryRun)
     }
 
     func fanOutSettings(

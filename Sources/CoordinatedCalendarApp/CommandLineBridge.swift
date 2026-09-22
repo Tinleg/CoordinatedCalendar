@@ -126,6 +126,7 @@ enum CommandLineBridge {
                     event.title ?? "Untitled",
                     "external: \(event.calendarItemExternalIdentifier ?? "none")",
                     "recurring: \(event.hasRecurrenceRules ? "yes" : "no")",
+                    "alerts: \((event.alarms ?? []).count)",
                     marker.map { "marker: \($0.copyMode)" } ?? "marker: none",
                     "copy of: \(marker?.sourceEventExternalID ?? "-")"
                 ].joined(separator: "\t"))
@@ -172,6 +173,8 @@ enum CommandLineBridge {
                 var settings = try baseSettings(options: options, source: source, destination: destination)
                 settings.skipBridgeCreatedSourceEvents = true
                 settings.transform.includeSourceCalendarInTitle = true
+                // A consolidated copy does not alert: the meeting already does, in its own calendar.
+                settings.transform.copyAlarms = options.hasFlag("keep-alerts")
                 let result = await engine.run(settings: settings)
                 printSummary(label: "fan-in \(source.displayName) -> \(destination.displayName)", result: result)
                 aggregate.merge(result)
@@ -324,6 +327,7 @@ enum CommandLineBridge {
         transform.copyLocation = !options.hasFlag("no-location")
         transform.copyNotes = !options.hasFlag("no-notes")
         transform.copyURL = !options.hasFlag("no-url")
+        transform.copyAlarms = !options.hasFlag("no-alerts")
         transform.copyAsFreeBusyOnly = options.hasFlag("free-busy")
         transform.freeBusyTitle = options.value("busy-title") ?? "Busy"
         transform.includeOriginCalendarInFreeBusyTitle = options.hasFlag("origin-title")
@@ -737,6 +741,11 @@ Options:
   --no-location
   --no-notes
   --no-url
+  --no-alerts                For --copy: leave the source event's alerts off the copy.
+  --keep-alerts              For --fan-in and --cycle: keep each event's alerts on its consolidated copy.
+                             Off by default, so gathered copies don't alert a second time. Busy blocks
+                             never carry alerts. --sync-gui-settings follows the GUI's
+                             "Keep alerts on gathered events" instead.
   --exclude CAL              Exclude a calendar from fan-in/fan-out/cycle. Repeatable.
   --gui-settings PATH        Use a specific GUI settings JSON file.
   --no-reconcile-deletions   For --sync-gui-settings, disable deletion reconciliation.

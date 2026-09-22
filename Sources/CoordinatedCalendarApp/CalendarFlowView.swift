@@ -132,6 +132,11 @@ struct CalendarFlowView: View {
             ))
             .textFieldStyle(.roundedBorder)
             .help("The only text a busy block carries. Leave it blank for \"\(FreeBusyCompliance.fanOutTitle)\". Changing it retitles every existing busy block on the next sync.")
+            Toggle("Keep alerts on gathered events", isOn: Binding(
+                get: { viewModel.keepAlertsInConsolidated },
+                set: { viewModel.setKeepAlertsInConsolidated($0) }
+            ))
+            .help("Off by default: a gathered copy carries no alert, so a meeting doesn't notify you a second time from the consolidated calendar. Busy blocks never alert either way. Turning this on copies each event's own alerts; turning it off again removes them on the next sync.")
             Toggle("Skip events marked Free", isOn: Binding(
                 get: { viewModel.skipFreeEvents },
                 set: { viewModel.setSkipFreeEvents($0) }

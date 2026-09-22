@@ -843,6 +843,11 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             var violations = freeBusy
                 ? FreeBusyCompliance.violations(of: event, expectedTitle: expectedTitle)
                 : (event.hasRecurrenceRules ? ["recurrence"] : [])
+            // An alert can arrive after the copy was made: some accounts add a default one to every new
+            // event. The fingerprint covers only the source, so this is checked on the copy itself.
+            if !freeBusy, !settings.transform.copyAlarms, !(event.alarms ?? []).isEmpty {
+                violations.append("alerts")
+            }
             if metadata.hasPlainCalendarNames {
                 // Markers from before calendar names were hashed; rewriting the notes hashes them.
                 violations.append("marker")
@@ -891,6 +896,9 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                     }
                     try store.save(event)
                 } else {
+                    if violations.contains("alerts") {
+                        event.alarms = nil
+                    }
                     event.notes = BridgeEventMetadata.notesByAddingMarker(to: event.notes, metadata: metadata)
                     try store.save(event)
                 }
@@ -1530,8 +1538,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
         // Each occurrence is copied as its own event, so copies never carry recurrence rules (a rule on an
         // occurrence copy would expand into phantom events); full-detail copies describe it in their notes.
-        if transform.copyAsFreeBusyOnly {
-            // Free/busy copies never alert.
+        if transform.copyAsFreeBusyOnly || !transform.copyAlarms {
+            // Free/busy copies never alert, and neither do consolidated copies unless asked to.
             destinationEvent.alarms = nil
         } else if let alarms = sourceEvent.alarms {
             destinationEvent.alarms = alarms.map { $0.copy() as? EKAlarm }.compactMap { $0 }
@@ -1723,7 +1731,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             "Location: \(transform.copyLocation ? "copied" : "stripped")",
             "Notes: \(transform.copyNotes ? "copied" : "stripped")",
             "URL: \(transform.copyURL ? "copied" : "stripped")",
-            "Alarms: copied"
+            "Alerts: \(transform.copyAlarms ? "copied" : "stripped")"
         ]
         if !transform.notesFooter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             lines.append("Notes footer: appended")

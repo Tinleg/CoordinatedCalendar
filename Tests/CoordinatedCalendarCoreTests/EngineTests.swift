@@ -33,12 +33,13 @@ private final class Setup {
 
     /// One full sync, as the app runs it: every contributor into the hub, then the hub out to every recipient.
     @discardableResult
-    func sync(dryRun: Bool = false) async -> SyncResult {
+    func sync(dryRun: Bool = false, keepAlerts: Bool = false) async -> SyncResult {
         let start = day - 7 * 24 * hour
         let end = day + 30 * 24 * hour
         var total = SyncResult()
         for source in [home, work].sorted(by: { $0.key < $1.key }) {
             total.add(await engine.run(settings: .fanIn(sourceKey: source.key, consolidatedKey: hub.key,
+                                                        copyAlarms: keepAlerts,
                                                         startDate: start, endDate: end, dryRun: dryRun)))
         }
         for destination in [home, work].sorted(by: { $0.key < $1.key }) {
@@ -362,4 +363,46 @@ private extension SyncResult {
 
     #expect(result.failed == 1)
     #expect(setup.store.saves == 0)
+}
+
+@Test func gatheredCopiesAndBusyBlocksCarryNoAlerts() async throws {
+    let setup = Setup()
+    setup.addUsualEvents()
+    setup.store.editEvent(setup.standup) { $0.alarms = [EKAlarm(relativeOffset: -600)] }
+
+    await setup.sync()
+
+    // The source keeps its own alert; nothing the app writes has one.
+    #expect(setup.store.stored(setup.standup)?.alarms?.count == 1)
+    #expect(setup.copies(in: setup.hub).allSatisfy { ($0.alarms ?? []).isEmpty })
+    #expect(setup.busyBlocks(in: setup.home).allSatisfy { ($0.alarms ?? []).isEmpty })
+}
+
+@Test func anAlertAddedToAGatheredCopyIsRemovedAgain() async throws {
+    let setup = Setup()
+    setup.addUsualEvents()
+    await setup.sync()
+    let copyID = try #require(setup.copies(in: setup.hub).last?.eventIdentifier)
+
+    // Some accounts put a default alert on every new event, after the copy was written.
+    setup.store.editEvent(copyID) { $0.alarms = [EKAlarm(relativeOffset: -900)] }
+    let result = await setup.sync()
+
+    #expect(result.errors.isEmpty)
+    #expect((setup.store.stored(copyID)?.alarms ?? []).isEmpty)
+    #expect(setup.store.stored(copyID)?.eventIdentifier == copyID)
+    #expect(await setup.sync().changes == 0)
+}
+
+@Test func alertsAreKeptWhenAskedFor() async throws {
+    let setup = Setup()
+    setup.addUsualEvents()
+    setup.store.editEvent(setup.standup) { $0.alarms = [EKAlarm(relativeOffset: -600)] }
+
+    await setup.sync(keepAlerts: true)
+
+    let copy = try #require(setup.copies(in: setup.hub).last)
+    #expect(copy.alarms?.count == 1)
+    // Busy blocks still never alert.
+    #expect(setup.busyBlocks(in: setup.home).allSatisfy { ($0.alarms ?? []).isEmpty })
 }

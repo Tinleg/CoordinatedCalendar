@@ -89,6 +89,10 @@ public enum EventFingerprint {
            let notes = event.notes, notes.contains("\r") || notes.first?.isWhitespace == true {
             parts.append("notes:verbatim")
         }
+        // Appended only when alerts are dropped, so copies made when they were kept are unaffected.
+        if !transform.copyAsFreeBusyOnly, !transform.copyAlarms, !(event.alarms ?? []).isEmpty {
+            parts.append("alarms:stripped")
+        }
         // Likewise appended only when the source has participants, a notable status, or recurrence.
         if !transform.copyAsFreeBusyOnly, let details = EventDetailsSummary.text(for: event) {
             parts.append("details:\(details)")
