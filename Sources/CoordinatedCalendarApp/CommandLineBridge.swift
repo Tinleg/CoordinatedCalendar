@@ -24,6 +24,17 @@ enum CommandLineBridge {
                 return healthCheck(options: options)
             case "install-sync-agent":
                 return try installSyncAgent(options: options)
+            case "check-for-updates":
+                switch await UpdateChecker.check() {
+                case .available(let version, let page):
+                    print("CoordinatedCalendar \(version) is available (you have \(UpdateChecker.currentVersion)): \(page.absoluteString)")
+                case .upToDate(let version):
+                    print("You have the latest version (\(version)).")
+                case .failed(let reason):
+                    fputs("Could not check for updates: \(reason)\n", stderr)
+                    return 1
+                }
+                return 0
             case "diagnostics":
                 // Works without Calendar access too: a denied permission is one of the things it reports.
                 print(DiagnosticsReport.make(
@@ -627,6 +638,7 @@ private struct CLIOptions {
         "list-calendars",
         "list-events",
         "diagnostics",
+        "check-for-updates",
         "remove-all-copies",
         "copy",
         "delete",
@@ -669,6 +681,7 @@ Commands:
   --list-calendars
   --list-events --from CAL [--start D] [--end D]   Read-only: events with the identifiers identity is built from
   --diagnostics              A report for bug reports: calendar names replaced, event titles removed
+  --check-for-updates        Ask GitHub for the latest release (the only network request the app makes)
   --copy --from CAL --to CAL [--execute] [--free-busy]
   --delete --from CAL --to CAL [--execute]
   --fan-in --to CONSOLIDATED [--from CAL ...] [--execute]

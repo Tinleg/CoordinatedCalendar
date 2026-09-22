@@ -162,6 +162,7 @@ struct ContentView: View {
                     backgroundSyncSection
                     backgroundJobsSection
                     setupSummarySection
+                    updatesSection
                     uninstallSection
                 }
             }
@@ -423,7 +424,7 @@ struct ContentView: View {
     private var permissionSection: some View {
         GroupBox("Calendar Access") {
             VStack(alignment: .leading, spacing: 10) {
-                Text("CoordinatedCalendar needs full Calendar access to read events from your calendars and write copies. Everything stays on this Mac; it calls no external service.")
+                Text("CoordinatedCalendar needs full Calendar access to read events from your calendars and write copies. Everything stays on this Mac. The only thing the app ever contacts is GitHub, to check for a newer version, and only when you ask it to (see Updates below).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 HStack {
@@ -433,6 +434,34 @@ struct ContentView: View {
                         viewModel.requestAccess()
                     }
                 }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var updatesSection: some View {
+        GroupBox("Updates") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Installed: version \(UpdateChecker.currentVersion). Checking asks GitHub for the latest release number; nothing about your calendars is sent.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    Button(viewModel.isCheckingForUpdates ? "Checking…" : "Check for Updates") {
+                        viewModel.checkForUpdates()
+                    }
+                    .disabled(viewModel.isCheckingForUpdates)
+                    if let page = viewModel.availableUpdatePage {
+                        Button("Download") {
+                            NSWorkspace.shared.open(page)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    if let updateStatus = viewModel.updateStatus {
+                        Text(updateStatus)
+                            .font(.callout)
+                    }
+                }
+                Toggle("Check automatically once a week", isOn: $viewModel.checksForUpdatesAutomatically)
             }
             .padding(.vertical, 4)
         }

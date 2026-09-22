@@ -6,7 +6,7 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 **Decision:** read and write calendars only through EventKit and the accounts already in macOS Calendar. No provider APIs, OAuth apps, API keys or stored credentials.
 
-**Why:** sign-in, token refresh and re-authentication are Apple's problem. It works with any account the Calendar app can use, including Exchange tenants that block third-party calendar services. Nothing leaves the Mac.
+**Why:** sign-in, token refresh and re-authentication are Apple's problem. It works with any account the Calendar app can use, including Exchange tenants that block third-party calendar services. Nothing about your calendars leaves the Mac.
 
 **Cost:** a Mac has to be on and awake to sync, delivery rides on each provider's own sync delay, and only what EventKit exposes can be copied.
 
@@ -125,3 +125,11 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 **Decision:** releases are source-only; users build with `scripts/verify-on-mac.sh`.
 
 **Why:** a downloadable app without a paid Apple Developer ID would trip macOS security warnings. Building locally avoids that and keeps the Calendar permission tied to the user's own signing identity.
+
+## The update check asks, it never installs
+
+**Decision:** the only network request is an update check against GitHub's public releases API: on demand, or weekly if the user turns that on (off by default). A newer version is offered as a link to its release page; nothing is downloaded or replaced automatically.
+
+**Why:** people need to learn about fixes, but an app that reads every calendar on the Mac should not phone home unasked, and a self-updater (Sparkle) adds a framework, a signing key and an update feed to keep secure. The request carries only the app's name and version.
+
+**Cost:** updating is manual — download the new disk image and replace the app.

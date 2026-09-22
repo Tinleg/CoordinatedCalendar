@@ -33,6 +33,12 @@ final class BridgeViewModel: ObservableObject {
     @Published var startupError: String?
     /// What happened to selected calendars on the last refresh: re-attached, or missing.
     @Published var calendarNotices: [String] = []
+    @Published var isCheckingForUpdates = false
+    @Published var updateStatus: String?
+    @Published var availableUpdatePage: URL?
+    @Published var checksForUpdatesAutomatically = UpdateChecker.checksAutomatically {
+        didSet { UpdateChecker.checksAutomatically = checksForUpdatesAutomatically }
+    }
     private var calendarNames: [String: String] = [:]
     /// Shown from launch, so someone who opened the app from the download or its disk image learns to move
     /// it before turning on syncing, rather than when installing the background jobs fails.
@@ -70,6 +76,9 @@ final class BridgeViewModel: ObservableObject {
             return
         }
         restoreGUISettings()
+        if !isDemo, UpdateChecker.isDueForAutomaticCheck {
+            checkForUpdates(quietly: true)
+        }
         refreshSyncStatus()
         permissionStatus = engine.authorizationStatus()
         if permissionStatus == .fullAccess {
@@ -311,6 +320,27 @@ final class BridgeViewModel: ObservableObject {
             statusText = "Submitted the CoordinatedCalendar sync job and health check."
         } catch {
             result = failureResult(error.localizedDescription)
+        }
+    }
+
+    /// Asks GitHub for the latest release. `quietly` is the weekly automatic check, which says nothing
+    /// unless there is something newer.
+    func checkForUpdates(quietly: Bool = false) {
+        guard !isCheckingForUpdates else { return }
+        isCheckingForUpdates = true
+        Task {
+            let outcome = await UpdateChecker.check()
+            isCheckingForUpdates = false
+            switch outcome {
+            case .available(let version, let page):
+                availableUpdatePage = page
+                updateStatus = "Version \(version) is available."
+            case .upToDate(let version):
+                availableUpdatePage = nil
+                if !quietly { updateStatus = "You have the latest version (\(version))." }
+            case .failed(let reason):
+                if !quietly { updateStatus = "Could not check: \(reason)" }
+            }
         }
     }
 
