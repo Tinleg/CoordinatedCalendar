@@ -31,6 +31,9 @@ final class BridgeViewModel: ObservableObject {
     @Published var backgroundJobs: [SyncAgentInstaller.JobDetails] = []
     /// Set when the settings folder could not be opened; changes are disabled until the app is relaunched.
     @Published var startupError: String?
+    /// Shown from launch, so someone who opened the app from the download or its disk image learns to move
+    /// it before turning on syncing, rather than when installing the background jobs fails.
+    let installLocationWarning: String? = SyncAgentInstaller.installLocationProblem?.message
     /// `-demoMode YES` shows synthetic calendars for screenshots and never reads or writes calendars or settings.
     let isDemo = UserDefaults.standard.bool(forKey: "demoMode")
     @Published var result = SyncResult()

@@ -433,7 +433,8 @@ enum CommandLineBridge {
     private static func installAgent(options: CLIOptions) throws -> Int32 {
         let consolidated = try options.requiredValue("consolidated")
         let interval = Int(options.value("interval") ?? "300") ?? 300
-        let executable = Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
+        // Through the same guard as every other job installation; this path used to skip it entirely.
+        let executable = try SyncAgentInstaller.stableExecutablePath()
         let label = "io.github.tinleg.coordinatedcalendar.cycle"
         let plistURL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(label).plist")

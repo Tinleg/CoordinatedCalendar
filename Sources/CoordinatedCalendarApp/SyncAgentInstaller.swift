@@ -11,14 +11,23 @@ enum SyncAgentInstaller {
     private static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
     private static var launchAgentsURL: URL { home.appendingPathComponent("Library/LaunchAgents", isDirectory: true) }
 
-    /// Returns the running executable, refusing temporary locations that macOS clears on restart.
+    /// Returns the running executable, refusing any copy that is not in /Applications or ~/Applications.
+    /// Background jobs record this path, so a copy that is later moved, deleted, ejected or cleaned away
+    /// would leave them pointing at nothing — which is how syncing once stopped silently after a restart.
     static func stableExecutablePath() throws -> String {
-        let path = (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]))
-            .resolvingSymlinksInPath().path
-        if path.hasPrefix("/private/tmp/") || path.hasPrefix("/tmp/") || path.hasPrefix("/private/var/folders/") {
-            throw CLIError.message("CoordinatedCalendar is running from \(path), which macOS clears on restart. Run it from ~/Applications/CoordinatedCalendar.app before installing background jobs.")
+        if let problem = installLocationProblem {
+            throw CLIError.message(problem.message)
         }
-        return path
+        return (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]))
+            .resolvingSymlinksInPath().path
+    }
+
+    /// Why this copy should not be the one background jobs point at, or nil when it is in place.
+    static var installLocationProblem: InstallLocation.Problem? {
+        InstallLocation.problem(
+            forBundlePath: Bundle.main.bundleURL.resolvingSymlinksInPath().path,
+            home: FileManager.default.homeDirectoryForCurrentUser.path
+        )
     }
 
     /// Replaces every existing CoordinatedCalendar LaunchAgent with the sync and health agents. Returns the plist paths.
