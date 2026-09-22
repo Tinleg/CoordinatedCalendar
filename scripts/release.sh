@@ -29,7 +29,8 @@ CURRENT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIS
 # A run that stopped after pushing its release commit (CI, the image) picks up from there, including
 # any fixes committed on top of it; the tag goes on the commit the image is built from.
 RESUME=no
-if [[ "$CURRENT" == "$VERSION" ]] && git log --format=%s | grep -qx "Release $VERSION"; then
+# (No `| grep -q` here: it stops reading early, git log dies of SIGPIPE, and pipefail makes that "no".)
+if [[ "$CURRENT" == "$VERSION" && -n "$(git log -n 1 --format=%H --grep="^Release $VERSION\$")" ]]; then
   RESUME=yes
 fi
 [[ "$RESUME" == yes ]] || [[ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" == "$VERSION" && "$CURRENT" != "$VERSION" ]] \

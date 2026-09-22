@@ -30,12 +30,12 @@ APPLICATIONS_X=490
 ICONS_Y=185
 
 [[ -f "$BACKGROUND" ]] || { echo "Missing $BACKGROUND; run: swift scripts/generate-dmg-background.swift" >&2; exit 1; }
-if hdiutil info | grep -q "/Volumes/$VOLUME"; then
+if [[ "$(hdiutil info)" == *"/Volumes/$VOLUME"* ]]; then
   echo "A volume named $VOLUME is already mounted; eject it first." >&2
   exit 1
 fi
 
-DEVELOPER_ID="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/"Developer ID Application/{print $2; exit}')"
+DEVELOPER_ID="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/"Developer ID Application/ && !found {print $2; found=1}')"
 
 rm -rf "$WORK" "$OUTPUT"
 mkdir -p "$WORK/root/.background"

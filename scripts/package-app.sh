@@ -41,7 +41,7 @@ SIGN_FLAGS=(--force --options runtime --entitlements "$ROOT_DIR/Packaging/Coordi
 if command -v codesign >/dev/null 2>&1; then
   if security find-identity -v -p codesigning 2>/dev/null | grep -F "$SIGN_IDENTITY" >/dev/null; then
     IDENTITY="$SIGN_IDENTITY"
-  elif FIRST_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/valid identities found/{exit} /"/{print $2; exit}')" && [[ -n "$FIRST_IDENTITY" ]]; then
+  elif FIRST_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/valid identities found/{done=1} /"/ && !done {print $2; done=1}')" && [[ -n "$FIRST_IDENTITY" ]]; then
     IDENTITY="$FIRST_IDENTITY"
   else
     IDENTITY="-"
