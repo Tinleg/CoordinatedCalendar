@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - **The download is signed.** The disk image itself now carries the same signature as the app inside it, so macOS can tell a download that was altered on the way. Nothing changes when installing: the app is still not notarized, so the first launch still needs **Open Anyway** once.
 
