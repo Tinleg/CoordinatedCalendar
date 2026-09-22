@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Copy Diagnostics** on the Status page (and `--diagnostics`): a report to attach to a bug report — versions, where the app runs from, how each kind of calendar is set up, the background jobs and recent sync results. Calendar and account names are replaced with labels, event titles are removed, and nothing is sent anywhere.
 - **A calendar that comes back under a new identifier is re-attached automatically.** Removing and re-adding an account (the usual fix when Calendar stops showing its events) gives its calendars new identifiers; the app now recognises them by name, re-attaches them with their settings, and says so. A selected calendar that is only temporarily unavailable stays selected instead of being silently dropped along with its settings.
 - **Background jobs are attributed to the app.** macOS now names CoordinatedCalendar in "Background Items Added" and in System Settings > General > Login Items. Existing jobs gain this the next time they are submitted (Status page > Submit Background Jobs).
 - **Disk image builds.** `scripts/make-dmg.sh` produces `dist/CoordinatedCalendar-<version>.dmg` with the familiar "drag to Applications" window. It signs with a Developer ID certificate and notarizes when those credentials exist, and reports plainly when they don't.

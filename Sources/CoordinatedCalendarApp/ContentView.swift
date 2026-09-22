@@ -523,6 +523,11 @@ struct ContentView: View {
                         viewModel.removeBackgroundJobs()
                     }
                     .disabled(viewModel.isRunning || !viewModel.backgroundJobsInstalled)
+                    Spacer()
+                    Button("Copy Diagnostics") {
+                        viewModel.copyDiagnostics()
+                    }
+                    .help("Copies a report for a bug report. Calendar and account names are replaced with labels and event titles removed. Nothing is sent anywhere.")
                 }
             }
             .padding(.vertical, 4)

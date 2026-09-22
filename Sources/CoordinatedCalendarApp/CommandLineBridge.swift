@@ -24,6 +24,12 @@ enum CommandLineBridge {
                 return healthCheck(options: options)
             case "install-sync-agent":
                 return try installSyncAgent(options: options)
+            case "diagnostics":
+                // Works without Calendar access too: a denied permission is one of the things it reports.
+                print(DiagnosticsReport.make(
+                    engine: CoordinatedCalendarEngine(ledger: try MappingLedger()),
+                    settingsStore: try? GUISettingsStore()))
+                return 0
             default:
                 break
             }
@@ -620,6 +626,7 @@ private struct CLIOptions {
         "install-sync-agent",
         "list-calendars",
         "list-events",
+        "diagnostics",
         "remove-all-copies",
         "copy",
         "delete",
@@ -661,6 +668,7 @@ CoordinatedCalendar script mode
 Commands:
   --list-calendars
   --list-events --from CAL [--start D] [--end D]   Read-only: events with the identifiers identity is built from
+  --diagnostics              A report for bug reports: calendar names replaced, event titles removed
   --copy --from CAL --to CAL [--execute] [--free-busy]
   --delete --from CAL --to CAL [--execute]
   --fan-in --to CONSOLIDATED [--from CAL ...] [--execute]

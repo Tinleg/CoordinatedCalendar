@@ -106,6 +106,10 @@ Two things to do around it:
 
 The app handles the rest: macOS also regenerates the events' identifiers, and existing copies are re-linked to them in place rather than deleted and recreated.
 
+## Reporting a Problem
+
+Open an issue on GitHub and paste in a diagnostics report: **Status page → Copy Diagnostics**, or `--diagnostics` from Terminal. It includes versions, how your calendars are set up and recent sync results, with calendar and account names replaced by labels and event titles removed. Read it before you post it; nothing is sent anywhere unless you paste it.
+
 ## Script Mode
 
 Use the packaged app binary for automation so macOS Calendar permission stays attached to the same bundle identity:

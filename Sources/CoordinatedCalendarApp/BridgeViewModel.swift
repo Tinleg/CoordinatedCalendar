@@ -314,6 +314,12 @@ final class BridgeViewModel: ObservableObject {
         }
     }
 
+    /// Copies a redacted diagnostics report for a bug report. Nothing is sent anywhere.
+    func copyDiagnostics() {
+        DiagnosticsReport.copyToPasteboard(DiagnosticsReport.make(engine: engine, settingsStore: guiSettingsStore))
+        statusText = "Diagnostics copied. Calendar and account names are replaced and event titles removed; paste it into a GitHub issue."
+    }
+
     func removeBackgroundJobs() {
         guard !actionsBlocked else { return }
         do {
