@@ -102,7 +102,7 @@ If an Exchange or Microsoft 365 calendar shows events on the web that the Mac's 
 Two things to do around it:
 
 1. **Pause syncing first**: on the Status page, **Remove Background Jobs**. While the account is off, its events briefly vanish, and a sync in that gap would treat them all as deleted.
-2. **Re-select the calendar afterwards.** macOS gives a re-added account's calendars new identifiers, so it appears unchecked on the Calendars page. Tick it again on both sides, preview a sync, then **Submit Background Jobs** to resume.
+2. **Resume afterwards** with **Submit Background Jobs**. macOS gives a re-added account's calendars new identifiers; the app notices the calendar came back under the same name, re-attaches it with its settings, and says so at the top of the Status page. Preview a sync first if you want to see what it will do.
 
 The app handles the rest: macOS also regenerates the events' identifiers, and existing copies are re-linked to them in place rather than deleted and recreated.
 

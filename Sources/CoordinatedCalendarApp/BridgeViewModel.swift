@@ -31,6 +31,9 @@ final class BridgeViewModel: ObservableObject {
     @Published var backgroundJobs: [SyncAgentInstaller.JobDetails] = []
     /// Set when the settings folder could not be opened; changes are disabled until the app is relaunched.
     @Published var startupError: String?
+    /// What happened to selected calendars on the last refresh: re-attached, or missing.
+    @Published var calendarNotices: [String] = []
+    private var calendarNames: [String: String] = [:]
     /// Shown from launch, so someone who opened the app from the download or its disk image learns to move
     /// it before turning on syncing, rather than when installing the background jobs fails.
     let installLocationWarning: String? = SyncAgentInstaller.installLocationProblem?.message
@@ -117,6 +120,13 @@ final class BridgeViewModel: ObservableObject {
             consolidatedCalendarKey = calendars.first {
                 $0.displayName.localizedCaseInsensitiveContains("consolidated")
             }?.stableKey
+        }
+        // Before pruning: a selected calendar that came back under a new identifier is re-attached, with its
+        // settings, instead of being dropped.
+        var reconciled = currentGUISettings()
+        calendarNotices = reconciled.reconcileCalendars(with: calendars).notices
+        if reconciled != currentGUISettings() {
+            applyStoredSettings(reconciled)
         }
         pruneAutomationSelections()
     }
@@ -463,16 +473,10 @@ final class BridgeViewModel: ObservableObject {
     }
 
     private func pruneAutomationSelections() {
-        let keys = Set(calendars.map(\.stableKey))
-        contributorCalendarKeys.formIntersection(keys)
-        recipientCalendarKeys.formIntersection(keys)
-        contributorIntervals = contributorIntervals.filter { keys.contains($0.key) }
-        recipientIntervals = recipientIntervals.filter { keys.contains($0.key) }
-        contributorAvailabilities = contributorAvailabilities.filter { keys.contains($0.key) }
-        recipientAvailabilities = recipientAvailabilities.filter { keys.contains($0.key) }
-        if let consolidatedCalendarKey, !keys.contains(consolidatedCalendarKey) {
-            self.consolidatedCalendarKey = nil
-        }
+        // Missing calendars are deliberately kept. This used to drop any selected calendar that was absent at
+        // that moment — an account offline for a minute, or re-added under a new identifier — along with its
+        // per-calendar settings, so it stopped syncing and came back with defaults. reconcileCalendars
+        // re-attaches the re-added ones and reports the rest.
         normalizeContributorAvailabilities()
         normalizeRecipientAvailabilities()
         if let consolidatedCalendarKey {
@@ -497,6 +501,14 @@ final class BridgeViewModel: ObservableObject {
             guard let stored = try guiSettingsStore.load() else {
                 return
             }
+            applyStoredSettings(stored)
+        } catch {
+            statusText = "Could not load saved GUI settings: \(error.localizedDescription)"
+        }
+    }
+
+    private func applyStoredSettings(_ stored: GUISettings) {
+        do {
             if let storedMode = Mode(rawValue: stored.modeRawValue) {
                 mode = storedMode
             }
@@ -517,10 +529,9 @@ final class BridgeViewModel: ObservableObject {
             skipFreeEvents = stored.skipFreeEvents ?? true
             skipDeclinedEvents = stored.skipDeclinedEvents ?? true
             syncInterval = stored.effectiveSyncInterval
+            calendarNames = stored.calendarNames ?? [:]
             normalizeContributorAvailabilities()
             normalizeRecipientAvailabilities()
-        } catch {
-            statusText = "Could not load saved GUI settings: \(error.localizedDescription)"
         }
     }
 
@@ -564,7 +575,8 @@ final class BridgeViewModel: ObservableObject {
             fanOutTitle: fanOutTitle,
             skipFreeEvents: skipFreeEvents,
             skipDeclinedEvents: skipDeclinedEvents,
-            syncInterval: syncInterval
+            syncInterval: syncInterval,
+            calendarNames: calendarNames
         )
     }
 

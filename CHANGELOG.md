@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **A calendar that comes back under a new identifier is re-attached automatically.** Removing and re-adding an account (the usual fix when Calendar stops showing its events) gives its calendars new identifiers; the app now recognises them by name, re-attaches them with their settings, and says so. A selected calendar that is only temporarily unavailable stays selected instead of being silently dropped along with its settings.
 - **Background jobs are attributed to the app.** macOS now names CoordinatedCalendar in "Background Items Added" and in System Settings > General > Login Items. Existing jobs gain this the next time they are submitted (Status page > Submit Background Jobs).
 - **Disk image builds.** `scripts/make-dmg.sh` produces `dist/CoordinatedCalendar-<version>.dmg` with the familiar "drag to Applications" window. It signs with a Developer ID certificate and notarizes when those credentials exist, and reports plainly when they don't.
 - **Background syncing can only be turned on from an Applications folder.** If the app was opened straight from a download, from its disk image, from a temporary folder or from anywhere else, it says so on the Status page from launch and explains how to move it, instead of installing background jobs that would break when that copy moves or disappears. The older `--install-agent` command now goes through the same check; it previously skipped it.

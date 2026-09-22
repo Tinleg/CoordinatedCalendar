@@ -221,8 +221,18 @@ enum CommandLineBridge {
             } else {
                 store = try GUISettingsStore()
             }
-            guard let saved = try store.load() else {
+            guard var saved = try store.load() else {
                 throw CLIError.message("No GUI settings file was found.")
+            }
+            // Before anything else: a calendar that came back under a new identifier is re-attached here,
+            // unattended, rather than failing every run until someone opens the app.
+            let unreconciled = saved
+            let reconciliation = saved.reconcileCalendars(with: engine.calendars())
+            if saved != unreconciled {
+                try store.save(saved)
+            }
+            for notice in reconciliation.notices {
+                print(notice)
             }
             guard let consolidatedKey = saved.consolidatedCalendarKey else {
                 throw CLIError.message("Saved GUI settings do not include a consolidated calendar.")

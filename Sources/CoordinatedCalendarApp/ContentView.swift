@@ -68,6 +68,13 @@ struct ContentView: View {
                     Text(current.summary)
                         .foregroundStyle(.secondary)
                 }
+                ForEach(viewModel.calendarNotices, id: \.self) { notice in
+                    Label(notice, systemImage: "calendar.badge.exclamationmark")
+                        .foregroundStyle(.orange)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+                }
                 if let installLocationWarning = viewModel.installLocationWarning {
                     Label(installLocationWarning, systemImage: "arrow.down.app")
                         .foregroundStyle(.orange)

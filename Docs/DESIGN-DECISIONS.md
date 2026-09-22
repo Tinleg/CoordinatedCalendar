@@ -56,7 +56,7 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 **The re-link rule is deliberately narrow:** an exact match on the title the copy would have, start, end and all-day, and one-to-one on both sides. Two real events with the same title and times would be a guess, and recreating one copy is better than attaching it to the wrong event.
 
-**Still true:** the calendar has to be re-selected in the app afterwards, because settings are keyed by calendar key.
+**Settings follow the calendar too.** Settings are keyed by calendar key, so they also record each selected calendar's name; a key that vanishes is re-attached to the one calendar now carrying its name, with its per-calendar settings. A selected calendar that is merely absent — an account offline for a while — stays selected and is reported, rather than being dropped as it used to be.
 
 ## Copy occurrences, never recurrence rules
 
