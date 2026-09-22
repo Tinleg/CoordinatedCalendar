@@ -260,8 +260,9 @@ enum CommandLineBridge {
 
             // The scheduled job passes a rolling window; the saved GUI dates apply only when it is absent.
             let hasWindowOptions = options.value("window-days-past") != nil || options.value("window-days-future") != nil
-            let startDate = try hasWindowOptions ? startDate(options: options) : (saved.startDate ?? startDate(options: options))
-            let endDate = try hasWindowOptions ? endDate(options: options) : (saved.endDate ?? endDate(options: options))
+            let savedDates = saved.syncWindow().dates()
+            let startDate = try hasWindowOptions ? startDate(options: options) : savedDates.start
+            let endDate = try hasWindowOptions ? endDate(options: options) : savedDates.end
             let dryRun = !options.hasFlag("execute")
             var aggregate = SyncResult()
 
@@ -405,16 +406,21 @@ enum CommandLineBridge {
         if let value = options.value("start") {
             return try parseDate(value)
         }
-        let days = Int(options.value("window-days-past") ?? "30") ?? 30
-        return Calendar.current.date(byAdding: .day, value: -days, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+        return optionWindow(options).dates().start
     }
 
     private static func endDate(options: CLIOptions) throws -> Date {
         if let value = options.value("end") {
             return try parseDate(value)
         }
-        let days = Int(options.value("window-days-future") ?? "365") ?? 365
-        return Calendar.current.date(byAdding: .day, value: days, to: Date()) ?? Date()
+        return optionWindow(options).dates().end
+    }
+
+    private static func optionWindow(_ options: CLIOptions) -> SyncWindow {
+        SyncWindow(
+            daysPast: options.value("window-days-past").flatMap(Int.init) ?? SyncWindow.standard.daysPast,
+            daysFuture: options.value("window-days-future").flatMap(Int.init) ?? SyncWindow.standard.daysFuture
+        )
     }
 
     private static func parseDate(_ value: String) throws -> Date {
@@ -507,15 +513,27 @@ enum CommandLineBridge {
     }
 
     private static func installSyncAgent(options: CLIOptions) throws -> Int32 {
-        let saved = try GUISettingsStore().load()
+        let store = try GUISettingsStore()
+        let saved = try store.load()
         let interval = options.value("interval").flatMap(Int.init) ?? saved?.effectiveSyncInterval ?? 300
-        let window: [String]
-        if let past = options.value("window-days-past"), let future = options.value("window-days-future") {
-            window = ["--window-days-past", past, "--window-days-future", future]
+        let window: SyncWindow
+        if let past = options.value("window-days-past").flatMap(Int.init),
+           let future = options.value("window-days-future").flatMap(Int.init) {
+            window = SyncWindow(daysPast: past, daysFuture: future)
+            // The app shows and submits the saved window, so it has to be this one too.
+            if var saved, saved.syncWindow() != window || saved.windowDaysPast == nil {
+                saved.windowDaysPast = window.daysPast
+                saved.windowDaysFuture = window.daysFuture
+                let dates = window.dates()
+                saved.startDate = dates.start
+                saved.endDate = dates.end
+                try store.save(saved)
+                print("Saved the window (\(window.daysPast) days back, \(window.daysFuture) ahead) in the app's settings")
+            }
         } else {
-            window = SyncAgentInstaller.relativeWindowArguments(start: saved?.startDate, end: saved?.endDate)
+            window = saved?.syncWindow() ?? .standard
         }
-        for url in try SyncAgentInstaller.install(interval: interval, windowArguments: window) {
+        for url in try SyncAgentInstaller.install(interval: interval, windowArguments: window.arguments) {
             print("Installed and loaded \(url.path)")
         }
         return 0

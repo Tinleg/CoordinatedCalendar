@@ -63,7 +63,7 @@ The first time the app reads your calendars, macOS asks for Calendar access: cho
      - On the left (**Fan-In**), check every calendar whose events should be gathered.
      - On the right (**Fan-Out**), check every calendar that should receive busy blocks, usually the same writable calendars. For each one, the availability picker keeps the source status (**Leave As-Is**) or forces Free, Busy or Tentative, limited to what that calendar supports.
      - Each calendar's row shows its account type, whether it's writable, and the statuses it supports. Curves show where events flow.
-   - **Schedule:** choose how often the background sync runs, and the **Date Window** to keep in sync.
+   - **Schedule:** choose how often the background sync runs, and the **Date Window** to keep in sync, as days back and days ahead of today. The window moves forward a day each day; copies of events that fall out of it are left as they are and no longer updated.
 4. **Preview first.** On **Preview & Run**, click **Preview Sync** and check the planned copies before anything is written.
 5. **Click Submit Background Jobs** on the **Status** page. This installs the scheduled sync and the health check (see [Automatic Runs](#automatic-runs)). From then on, fan-in and fan-out run every few minutes without the app open.
 6. **Check it's healthy.** The **Status** page shows the last sync and any problems, or run `~/Applications/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar --health-check`. Calendar choices, the busy block title and the skip settings apply on the next run. After changing the interval or date window, submit the background jobs again.

@@ -490,9 +490,31 @@ struct ContentView: View {
     private var dateSection: some View {
         GroupBox("Date Window") {
             VStack(alignment: .leading, spacing: 12) {
-                DatePicker("Start", selection: binding(\.startDate), displayedComponents: [.date, .hourAndMinute])
-                DatePicker("End", selection: binding(\.endDate), displayedComponents: [.date, .hourAndMinute])
+                windowDaysRow("Days back", value: viewModel.syncWindow.daysPast, range: 0...3650) {
+                    viewModel.setSyncWindow(SyncWindow(daysPast: $0, daysFuture: viewModel.syncWindow.daysFuture))
+                }
+                windowDaysRow("Days ahead", value: viewModel.syncWindow.daysFuture, range: 1...3650) {
+                    viewModel.setSyncWindow(SyncWindow(daysPast: viewModel.syncWindow.daysPast, daysFuture: $0))
+                }
+                let dates = viewModel.syncWindow.dates()
+                Text("Today that is \(dates.start.formatted(date: .abbreviated, time: .omitted)) to \(dates.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted)). The window moves forward a day each day, in the app and in the background job. Copies of events that fall out of it are left as they are, no longer updated.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func windowDaysRow(_ label: String, value: Int, range: ClosedRange<Int>, set: @escaping (Int) -> Void) -> some View {
+        HStack {
+            Text(label)
+            TextField(label, value: Binding(get: { value }, set: { set(min(max($0, range.lowerBound), range.upperBound)) }), format: .number)
+                .frame(width: 70)
+                .multilineTextAlignment(.trailing)
+                .labelsHidden()
+            Stepper(label, value: Binding(get: { value }, set: set), in: range)
+                .labelsHidden()
+            Text("days").foregroundStyle(.secondary)
         }
     }
 

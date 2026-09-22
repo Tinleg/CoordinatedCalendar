@@ -71,12 +71,14 @@ enum SyncAgentInstaller {
     }
 
     /// Converts the saved GUI date range into a rolling window relative to today.
-    static func relativeWindowArguments(start: Date?, end: Date?) -> [String] {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
-        let past = start.map { max(0, calendar.dateComponents([.day], from: calendar.startOfDay(for: $0), to: today).day ?? 30) } ?? 30
-        let future = end.map { max(1, calendar.dateComponents([.day], from: today, to: calendar.startOfDay(for: $0)).day ?? 365) } ?? 365
-        return ["--window-days-past", "\(past)", "--window-days-future", "\(future)"]
+    /// The window the installed sync job runs with, read from its plist; nil when there is none.
+    static func installedSyncWindow() -> SyncWindow? {
+        let url = launchAgentsURL.appendingPathComponent("\(syncLabel).plist")
+        guard let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let arguments = plist["ProgramArguments"] as? [String]
+        else { return nil }
+        return SyncWindow(arguments: arguments)
     }
 
     /// What an installed LaunchAgent does, read from its plist and from launchd.

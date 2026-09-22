@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The sync window is kept in days, everywhere.** The Date Window now reads "days back" and "days ahead" and moves forward each day, in the app as it already did in the background job. The app previously saved fixed dates and turned them into days only when jobs were submitted, so the two could disagree, and a Submit could quietly shorten what the job covered. Existing settings adopt the installed job's window. `--install-sync-agent` with a window records it in the app's settings too.
 - **A moved meeting keeps its copies.** Moving an event to a new time used to delete its consolidated copy and every busy block made from it and create new ones, so their event IDs changed each time something was rescheduled. They are now updated in place. (A recurring event's occurrences share one identifier, so a moved occurrence is still replaced.)
 - **Engine tests.** The sync engine now runs against an in-memory calendar store in the tests: fan-in, fan-out, edits, moves, deletions, Free events, stripping, duplicates from two Macs, a re-added account, dry runs, failed writes and removing everything. Writing them found the moved-meeting problem above.
 - **Check for Updates** on the Status page (and `--check-for-updates`): asks GitHub for the newest release and, if there is one, offers to open its download page. It also checks once a week while the app is open; that can be turned off. This is the only network request the app makes, and it sends nothing about your calendars.

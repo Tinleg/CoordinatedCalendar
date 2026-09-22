@@ -51,6 +51,10 @@ final class BridgeViewModel: ObservableObject {
     @Published var isRunning = false
     @Published var permissionStatus: EKAuthorizationStatus = .notDetermined
 
+    /// The sync window in days from today; `settings.startDate`/`endDate` are its dates, refreshed from it
+    /// whenever a run starts, so a window left open overnight still moves forward.
+    @Published private(set) var syncWindow = SyncWindow.standard
+
     private let engine: CoordinatedCalendarEngine
     private let guiSettingsStore: GUISettingsStore
     private var task: Task<Void, Never>?
@@ -76,6 +80,7 @@ final class BridgeViewModel: ObservableObject {
             return
         }
         restoreGUISettings()
+        applyWindowDates()
         if !isDemo, UpdateChecker.isDueForAutomaticCheck {
             checkForUpdates(quietly: true)
         }
@@ -314,7 +319,7 @@ final class BridgeViewModel: ObservableObject {
             saveGUISettings()
             try SyncAgentInstaller.install(
                 interval: syncInterval,
-                windowArguments: SyncAgentInstaller.relativeWindowArguments(start: settings.startDate, end: settings.endDate)
+                windowArguments: syncWindow.arguments
             )
             refreshSyncStatus()
             statusText = "Submitted the CoordinatedCalendar sync job and health check."
@@ -430,6 +435,7 @@ final class BridgeViewModel: ObservableObject {
         let contributorKeys = contributorCalendarKeys
         let recipientKeys = recipientCalendarKeys
         let plan = currentGUISettings()
+        applyWindowDates()
         let startDate = settings.startDate
         let endDate = settings.endDate
 
@@ -527,6 +533,18 @@ final class BridgeViewModel: ObservableObject {
         saveGUISettings()
     }
 
+    func setSyncWindow(_ window: SyncWindow) {
+        syncWindow = window
+        applyWindowDates()
+        saveGUISettings()
+    }
+
+    private func applyWindowDates() {
+        let dates = syncWindow.dates()
+        settings.startDate = dates.start
+        settings.endDate = dates.end
+    }
+
     func updateSettings<Value>(_ keyPath: WritableKeyPath<BridgeSettings, Value>, to value: Value) {
         settings[keyPath: keyPath] = value
         saveGUISettings()
@@ -548,12 +566,8 @@ final class BridgeViewModel: ObservableObject {
             if let storedMode = Mode(rawValue: stored.modeRawValue) {
                 mode = storedMode
             }
-            if let startDate = stored.startDate {
-                settings.startDate = startDate
-            }
-            if let endDate = stored.endDate {
-                settings.endDate = endDate
-            }
+            syncWindow = stored.syncWindow()
+            applyWindowDates()
             consolidatedCalendarKey = stored.consolidatedCalendarKey
             contributorCalendarKeys = Set(stored.contributorCalendarKeys)
             recipientCalendarKeys = Set(stored.recipientCalendarKeys)
@@ -599,8 +613,8 @@ final class BridgeViewModel: ObservableObject {
     private func currentGUISettings() -> GUISettings {
         GUISettings(
             modeRawValue: mode.rawValue,
-            startDate: self.settings.startDate,
-            endDate: self.settings.endDate,
+            startDate: syncWindow.dates().start,
+            endDate: syncWindow.dates().end,
             consolidatedCalendarKey: consolidatedCalendarKey,
             contributorCalendarKeys: contributorCalendarKeys.sorted(),
             recipientCalendarKeys: recipientCalendarKeys.sorted(),
@@ -612,7 +626,9 @@ final class BridgeViewModel: ObservableObject {
             skipFreeEvents: skipFreeEvents,
             skipDeclinedEvents: skipDeclinedEvents,
             syncInterval: syncInterval,
-            calendarNames: calendarNames
+            calendarNames: calendarNames,
+            windowDaysPast: syncWindow.daysPast,
+            windowDaysFuture: syncWindow.daysFuture
         )
     }
 

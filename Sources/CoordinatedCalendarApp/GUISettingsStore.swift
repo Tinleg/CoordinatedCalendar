@@ -3,6 +3,8 @@ import Foundation
 
 struct GUISettings: Codable, Equatable {
     var modeRawValue: String
+    /// The window's dates on the day the settings were saved. Kept for older builds; the window itself is
+    /// `windowDaysPast`/`windowDaysFuture`, which move forward with the calendar.
     var startDate: Date?
     var endDate: Date?
     var consolidatedCalendarKey: String?
@@ -23,6 +25,26 @@ struct GUISettings: Codable, Equatable {
     /// The display name each selected calendar key had when last seen. Names survive an account being removed
     /// and re-added; keys do not, so this is what lets a returning calendar be re-attached (CalendarRebinding).
     var calendarNames: [String: String]?
+    var windowDaysPast: Int?
+    var windowDaysFuture: Int?
+}
+
+extension GUISettings {
+    /// The sync window in days. Settings saved before the window was kept in days have only dates: then
+    /// the installed background job's window wins, since that is what has actually been syncing, and
+    /// failing that the saved dates are counted from today.
+    func syncWindow(installedJob: SyncWindow? = SyncAgentInstaller.installedSyncWindow()) -> SyncWindow {
+        if let windowDaysPast, let windowDaysFuture {
+            return SyncWindow(daysPast: windowDaysPast, daysFuture: windowDaysFuture)
+        }
+        if let installedJob {
+            return installedJob
+        }
+        if let startDate, let endDate {
+            return SyncWindow(start: startDate, end: endDate)
+        }
+        return .standard
+    }
 }
 
 extension GUISettings {
