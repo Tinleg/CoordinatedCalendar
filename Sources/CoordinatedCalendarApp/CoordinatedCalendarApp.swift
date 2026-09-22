@@ -36,8 +36,25 @@ struct CoordinatedCalendarApp: App {
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            // Without this, Help opens macOS's "help isn't available" box: the app has no help book.
+            CommandGroup(replacing: .help) {
+                Button("CoordinatedCalendar Help") { open(Links.readme) }
+                Button("Release Notes") { open(Links.releases) }
+                Divider()
+                Button("Report a Problem...") { open(Links.newIssue) }
+            }
         }
     }
+}
+
+enum Links {
+    static let readme = URL(string: "https://github.com/Tinleg/CoordinatedCalendar#readme")!
+    static let releases = UpdateChecker.releasesPage
+    static let newIssue = URL(string: "https://github.com/Tinleg/CoordinatedCalendar/issues/new/choose")!
+}
+
+private func open(_ url: URL) {
+    NSWorkspace.shared.open(url)
 }
 
 private struct MainWindow: View {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The Help menu does something.** It used to open macOS's "help isn't available" box. It now has **CoordinatedCalendar Help** (the README), **Release Notes**, and **Report a Problem...** (the issue form), each opening in your browser.
+
 - **Closing the window no longer strands the app.** The window used to close while the app kept running, with its menus in the menu bar but no way to get the window back: clicking the Dock icon did nothing. The app now reopens its window when you click the Dock icon or open it again, and closing the window still leaves it running (use Quit to exit).
 
 ## 0.3.2
