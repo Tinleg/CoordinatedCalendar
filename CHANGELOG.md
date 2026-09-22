@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - **The Help menu does something.** It used to open macOS's "help isn't available" box. It now has **CoordinatedCalendar Help** (the README), **Release Notes**, and **Report a Problem...** (the issue form), each opening in your browser.
 
