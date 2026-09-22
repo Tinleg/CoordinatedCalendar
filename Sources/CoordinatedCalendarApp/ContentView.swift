@@ -491,12 +491,8 @@ struct ContentView: View {
     private var dateSection: some View {
         GroupBox("Date Window") {
             VStack(alignment: .leading, spacing: 12) {
-                windowDaysRow("Days back", value: viewModel.syncWindow.daysPast, range: 0...3650) {
-                    viewModel.setSyncWindow(SyncWindow(daysPast: $0, daysFuture: viewModel.syncWindow.daysFuture))
-                }
-                windowDaysRow("Days ahead", value: viewModel.syncWindow.daysFuture, range: 1...3650) {
-                    viewModel.setSyncWindow(SyncWindow(daysPast: viewModel.syncWindow.daysPast, daysFuture: $0))
-                }
+                windowDaysRow("Days back", \.daysPast, range: 0...3650)
+                windowDaysRow("Days ahead", \.daysFuture, range: 1...3650)
                 let dates = viewModel.syncWindow.dates()
                 Text("Today that is \(dates.start.formatted(date: .abbreviated, time: .omitted)) to \(dates.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted)). The window moves forward a day each day, in the app and in the background job. Copies of events that fall out of it are left as they are, no longer updated.")
                     .font(.caption)
@@ -512,14 +508,22 @@ struct ContentView: View {
         return "Loaded"
     }
 
-    private func windowDaysRow(_ label: String, value: Int, range: ClosedRange<Int>, set: @escaping (Int) -> Void) -> some View {
-        HStack {
+    private func windowDaysRow(_ label: String, _ keyPath: WritableKeyPath<SyncWindow, Int>, range: ClosedRange<Int>) -> some View {
+        let days = Binding(
+            get: { viewModel.syncWindow[keyPath: keyPath] },
+            set: { value in
+                var window = viewModel.syncWindow
+                window[keyPath: keyPath] = min(max(value, range.lowerBound), range.upperBound)
+                viewModel.setSyncWindow(window)
+            }
+        )
+        return HStack {
             Text(label)
-            TextField(label, value: Binding(get: { value }, set: { set(min(max($0, range.lowerBound), range.upperBound)) }), format: .number)
+            TextField(label, value: days, format: .number)
                 .frame(width: 70)
                 .multilineTextAlignment(.trailing)
                 .labelsHidden()
-            Stepper(label, value: Binding(get: { value }, set: set), in: range)
+            Stepper(label, value: days, in: range)
                 .labelsHidden()
             Text("days").foregroundStyle(.secondary)
         }

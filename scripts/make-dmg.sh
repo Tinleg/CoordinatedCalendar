@@ -82,7 +82,8 @@ tell application "Finder"
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 128
     set text size of viewOptions to 13
-    set background picture of viewOptions to file ".background:background.tiff"
+    -- By full path: the relative form (file ".background:background.tiff") fails intermittently with -10006.
+    set background picture of viewOptions to (POSIX file "$MOUNT/.background/background.tiff" as alias)
     set position of item "CoordinatedCalendar.app" of container window to {$APP_X, $ICONS_Y}
     set position of item "Applications" of container window to {$APPLICATIONS_X, $ICONS_Y}
     close

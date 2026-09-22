@@ -26,28 +26,39 @@ git fetch --quiet origin main --tags
 [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || fail "HEAD is not origin/main; pull or push first"
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && fail "$TAG already exists"
 CURRENT="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
-[[ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" == "$VERSION" && "$CURRENT" != "$VERSION" ]] \
+# A run that stopped after pushing its release commit (CI, the image) picks up from there, including
+# any fixes committed on top of it; the tag goes on the commit the image is built from.
+RESUME=no
+if [[ "$CURRENT" == "$VERSION" ]] && git log --format=%s | grep -qx "Release $VERSION"; then
+  RESUME=yes
+fi
+[[ "$RESUME" == yes ]] || [[ "$(printf '%s\n%s\n' "$CURRENT" "$VERSION" | sort -V | tail -1)" == "$VERSION" && "$CURRENT" != "$VERSION" ]] \
   || fail "$VERSION is not newer than $CURRENT"
-UNRELEASED="$(awk '/^## Unreleased/{on=1; next} /^## /{on=0} on' CHANGELOG.md | sed '/^[[:space:]]*$/d')"
-[[ -n "$UNRELEASED" ]] || fail "nothing under ## Unreleased in CHANGELOG.md"
-IDENTITY="${COORDINATEDCALENDAR_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/"Apple Development/{print $2; exit}')}"
+HEADING="$([[ "$RESUME" == yes ]] && echo "$VERSION" || echo Unreleased)"
+UNRELEASED="$(awk -v h="## $HEADING" '$0 == h {on=1; next} /^## /{on=0} on' CHANGELOG.md | sed '/^[[:space:]]*$/d')"
+[[ -n "$UNRELEASED" ]] || fail "nothing under ## $HEADING in CHANGELOG.md"
+IDENTITY="${COORDINATEDCALENDAR_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/"Apple Development/ && !found {print $2; found=1}')}"
 [[ -n "$IDENTITY" ]] || fail "no Apple Development certificate in the keychain; set COORDINATEDCALENDAR_SIGN_IDENTITY"
 export COORDINATEDCALENDAR_SIGN_IDENTITY="$IDENTITY"
 command -v gh >/dev/null || fail "the GitHub CLI (gh) is required"
 
-echo "Releasing $CURRENT -> $VERSION, signed with: $IDENTITY"
+echo "Releasing $VERSION, signed with: $IDENTITY"
 
-# Version and changelog.
-BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $((BUILD + 1))" "$PLIST"
-sed -i '' "s/^## Unreleased$/## $VERSION/" CHANGELOG.md
+if [[ "$RESUME" == yes ]]; then
+  echo "Resuming: the release commit is already pushed; releasing $(git log -1 --format='%h %s')."
+else
+  # Version and changelog.
+  BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" -c "Set :CFBundleVersion $((BUILD + 1))" "$PLIST"
+  sed -i '' "s/^## Unreleased$/## $VERSION/" CHANGELOG.md
 
-echo "Running the tests..."
-swift test ${COORDINATEDCALENDAR_SCRATCH:+--scratch-path "$COORDINATEDCALENDAR_SCRATCH/test"} >/dev/null \
-  || { git checkout -- "$PLIST" CHANGELOG.md; fail "tests failed; nothing was changed"; }
+  echo "Running the tests..."
+  swift test ${COORDINATEDCALENDAR_SCRATCH:+--scratch-path "$COORDINATEDCALENDAR_SCRATCH/test"} >/dev/null \
+    || { git checkout -- "$PLIST" CHANGELOG.md; fail "tests failed; nothing was changed"; }
 
-git commit --quiet -m "Release $VERSION" -- "$PLIST" CHANGELOG.md
-git push --quiet origin HEAD:main
+  git commit --quiet -m "Release $VERSION" -- "$PLIST" CHANGELOG.md
+  git push --quiet origin HEAD:main
+fi
 COMMIT="$(git rev-parse HEAD)"
 
 echo "Waiting for CI on $COMMIT..."
@@ -65,10 +76,13 @@ echo "Building the disk image..."
 [[ -f "$DMG" ]] || fail "no $DMG"
 MOUNT="$(mktemp -d)"
 hdiutil attach -quiet -readonly -nobrowse -mountpoint "$MOUNT" "$DMG"
-SIGNER="$(codesign -dvv "$MOUNT/CoordinatedCalendar.app" 2>&1 | awk -F= '/^Authority=/{print $2; exit}')"
+trap 'hdiutil detach -quiet "$MOUNT" 2>/dev/null || true' EXIT
+# awk reads everything: exiting early would end codesign with SIGPIPE, which pipefail turns into a silent stop.
+SIGNER="$(codesign -dvv "$MOUNT/CoordinatedCalendar.app" 2>&1 | awk -F= '/^Authority=/ && !found {print $2; found=1}')"
 VERIFY_OK=yes; codesign --verify --strict "$MOUNT/CoordinatedCalendar.app" 2>/dev/null || VERIFY_OK=no
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$MOUNT/CoordinatedCalendar.app/Contents/Info.plist")"
 hdiutil detach -quiet "$MOUNT"
+trap - EXIT
 [[ "$SIGNER" == "$IDENTITY" && "$VERIFY_OK" == yes ]] || fail "the image's app is signed by '$SIGNER' (verify: $VERIFY_OK), not '$IDENTITY'"
 [[ "$APP_VERSION" == "$VERSION" ]] || fail "the image holds version $APP_VERSION"
 SHA="$(shasum -a 256 "$DMG" | cut -d' ' -f1)"

@@ -43,7 +43,7 @@ The version lives in `Packaging/Info.plist`: `CFBundleShortVersionString` is the
    - builds the disk image (`scripts/make-dmg.sh`), and checks that the app inside is the new version and is signed with the release certificate;
    - tags the commit, pushes the tag, and publishes the GitHub release, marked **Latest**, with the image attached and its SHA-256 checksum, install steps and the license line in the notes.
 
-   It stops before tagging if anything fails. If it stops after pushing the release commit, fix the problem and release the next patch version; do not reuse the number.
+   It stops before tagging if anything fails. If that happens after the release commit is pushed, fix the problem and run the same command again: it resumes from the release commit. Once a tag is published, never reuse its number.
 4. **Check the download:** open the release page, download the image, and open it: the "drag to Applications" window should appear with the first-launch instructions. The first run of `make-dmg.sh` asks to let the terminal control Finder, which lays out that window; without it the image still works, with Finder's default window.
 5. **Social preview:** if the preview image changed, upload `Docs/images/social-preview.png` in the repository's Settings > General > Social preview. It's a repository setting, not part of the release.
 
