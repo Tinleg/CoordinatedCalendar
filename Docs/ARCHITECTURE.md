@@ -123,6 +123,7 @@ The window is a sidebar of pages:
 Two launch options help with documentation:
 
 - `-initialPage <Page>` opens a given page.
+- `-closeWindowAfter <seconds>` closes the window on a timer, as the red button does, so that closing and reopening can be checked from a script; clicking the button itself needs accessibility permission.
 - `-demoMode YES` shows synthetic calendars and never reads or writes anything. With `-exportScreenshots DIR`, it saves each page as a PNG; the app images its own window, which needs no screen-recording permission.
 
 ## Command line

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **Closing the window no longer strands the app.** The window used to close while the app kept running, with its menus in the menu bar but no way to get the window back: clicking the Dock icon did nothing. The app now reopens its window when you click the Dock icon or open it again, and closing the window still leaves it running (use Quit to exit).
+
 ## 0.3.2
 
 - **The disk image window is laid out again.** 0.3.1's image opened as a plain Finder window, without the drag-to-Applications arrow or the first-launch instructions: Finder was asked to style the window before it could see the background file, and the build went ahead anyway. The build now waits for the file, accepts whichever way of naming it Finder takes on the day, and refuses to produce an image without its window layout. The app itself is unchanged.

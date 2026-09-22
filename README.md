@@ -66,6 +66,8 @@ You don't need an Apple developer account. The app is signed with your own code-
 
 ### Calendar access
 
+Closing the window leaves CoordinatedCalendar running; click its Dock icon to bring the window back, or **Quit** to exit. Background syncing is done by the scheduled jobs and runs whether or not the app is open.
+
 The first time the app reads your calendars, macOS asks for Calendar access: choose **Allow Full Access**. CoordinatedCalendar needs to read every calendar and write copies and busy blocks. The first time it posts a health notification, macOS may ask whether to allow notifications. The access prompt comes up again only if the app's signing identity changes.
 
 ## Suggested Setup
