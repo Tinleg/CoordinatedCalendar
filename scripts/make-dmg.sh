@@ -127,9 +127,18 @@ trap - EXIT
 hdiutil convert -quiet "$WORK/layout.dmg" -format UDZO -imagekey zlib-level=9 -o "$OUTPUT"
 rm -rf "$WORK"
 
+# The image is signed with the same certificate as the app inside it, so a download that was altered on
+# the way is detected. Only Developer ID gets a secure timestamp (notarization needs one; it also fails
+# without a network, and a development signature has no use for it).
+IMAGE_IDENTITY="${DEVELOPER_ID:-${COORDINATEDCALENDAR_SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/"Apple Development/ && !found {print $2; found=1}')}}"
 SIGNED=no
-if [[ -n "$DEVELOPER_ID" ]]; then
-  codesign --sign "$DEVELOPER_ID" --timestamp "$OUTPUT"
+if [[ -n "$IMAGE_IDENTITY" ]]; then
+  if [[ -n "$DEVELOPER_ID" ]]; then
+    codesign --sign "$IMAGE_IDENTITY" --timestamp "$OUTPUT"
+  else
+    codesign --sign "$IMAGE_IDENTITY" "$OUTPUT"
+  fi
+  codesign --verify --strict "$OUTPUT" || { echo "The image failed signature verification." >&2; exit 1; }
   SIGNED=yes
 fi
 
@@ -144,7 +153,7 @@ if [[ -n "${COORDINATEDCALENDAR_NOTARY_PROFILE:-}" ]]; then
 fi
 
 echo
-echo "Built $OUTPUT ($(du -h "$OUTPUT" | cut -f1 | tr -d ' '))"
+echo "Built $OUTPUT ($(ls -lh "$OUTPUT" | awk '{print $5}'))"
 echo "  window layout: $STYLED$([[ $STYLED == no ]] && echo ' — allow your terminal to control Finder in System Settings > Privacy & Security > Automation, then rerun')"
-echo "  Developer ID signed: $SIGNED"
+echo "  image signed by: $([[ "$SIGNED" == yes ]] && echo "$IMAGE_IDENTITY" || echo "nothing (no certificate found)")"
 echo "  notarized: $NOTARIZED$([[ $NOTARIZED == no ]] && echo ' — other Macs need a one-time Open Anyway in System Settings > Privacy & Security')"

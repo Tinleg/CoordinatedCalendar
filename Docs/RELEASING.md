@@ -49,7 +49,7 @@ The version lives in `Packaging/Info.plist`: `CFBundleShortVersionString` is the
 
 ## Signing
 
-Releases are signed with the maintainer's **Apple Development** certificate and the hardened runtime, and are **not notarized**; notarization needs a paid Apple Developer Program membership. So:
+Releases are signed with the maintainer's **Apple Development** certificate — the app with the hardened runtime, and the disk image around it — and are **not notarized**; notarization needs a paid Apple Developer Program membership. So:
 
 - The first launch on another Mac is blocked until the person clicks **Open Anyway** in System Settings > Privacy & Security. The README, the disk image window and the release notes all say so.
 - Every release must be signed with **the same certificate**. macOS ties the Calendar permission to the signer; a different one makes every user grant access again. `release.sh` refuses an image signed by anything but `COORDINATEDCALENDAR_SIGN_IDENTITY` (default: the keychain's first Apple Development certificate).
