@@ -98,6 +98,10 @@ APPLESCRIPT
   STYLED=no
   echo "Finder could not lay out the window: $LAYOUT_ERROR" >&2
 fi
+# Laying out the window gives the app bundle a com.apple.FinderInfo attribute. It is outside the signature,
+# but strict verification rejects it ("detritus not allowed"), and it would be copied into Applications.
+xattr -d com.apple.FinderInfo "$MOUNT/CoordinatedCalendar.app" 2>/dev/null || true
+codesign --verify --strict "$MOUNT/CoordinatedCalendar.app" || { echo "The app in the image fails strict verification." >&2; exit 1; }
 sync
 detach
 trap - EXIT
