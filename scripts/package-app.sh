@@ -33,14 +33,17 @@ if command -v xattr >/dev/null 2>&1; then
 fi
 
 SIGN_IDENTITY="${COORDINATEDCALENDAR_SIGN_IDENTITY:-CoordinatedCalendar Local}"
+# Hardened runtime on every build, whatever the identity, so the app always runs under the same rules a
+# notarized download does. Calendar access is refused under it unless the entitlement below is declared.
+SIGN_FLAGS=(--force --options runtime --entitlements "$ROOT_DIR/Packaging/CoordinatedCalendar.entitlements")
 
 if command -v codesign >/dev/null 2>&1; then
   if security find-identity -v -p codesigning 2>/dev/null | grep -F "$SIGN_IDENTITY" >/dev/null; then
-    codesign --force --sign "$SIGN_IDENTITY" "$STAGE_DIR" >/dev/null
+    codesign "${SIGN_FLAGS[@]}" --sign "$SIGN_IDENTITY" "$STAGE_DIR" >/dev/null
   elif FIRST_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F '"' '/valid identities found/{exit} /"/{print $2; exit}')" && [[ -n "$FIRST_IDENTITY" ]]; then
-    codesign --force --sign "$FIRST_IDENTITY" "$STAGE_DIR" >/dev/null
+    codesign "${SIGN_FLAGS[@]}" --sign "$FIRST_IDENTITY" "$STAGE_DIR" >/dev/null
   else
-    codesign --force --sign - "$STAGE_DIR" >/dev/null
+    codesign "${SIGN_FLAGS[@]}" --sign - "$STAGE_DIR" >/dev/null
   fi
 fi
 

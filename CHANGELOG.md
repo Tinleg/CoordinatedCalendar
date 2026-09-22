@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- The app is now signed with the **hardened runtime** and declares the Calendar entitlement it needs under it. Nothing changes in use; this is the prerequisite for a notarized download that installs without security warnings.
+
 ## 0.2.0
 
 **Behavior change:** full-detail copies in the consolidated calendar now carry their source event's identifiers and source calendar name in the clear (see below). Anything that reads the consolidated calendar's notes will see new marker fields; busy blocks on other calendars are unchanged.
