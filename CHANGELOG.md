@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The disk image window is laid out again.** 0.3.1's image opened as a plain Finder window, without the drag-to-Applications arrow or the first-launch instructions: Finder was asked to style the window before it could see the background file, and the build went ahead anyway. The build now waits for the file, accepts whichever way of naming it Finder takes on the day, and refuses to produce an image without its window layout. The app itself is unchanged.
+
 ## 0.3.1
 
 - **Gathered events no longer alert twice.** A copy in the consolidated calendar is now written without the source event's alerts, so a meeting notifies you from its own calendar only. Alerts on existing copies are removed on the next sync, including ones an account added by itself. **Keep alerts on gathered events** in the Calendars page copies them after all; `--fan-in` takes `--keep-alerts`, and `--copy` takes `--no-alerts`. Busy blocks never carried alerts and still don't.

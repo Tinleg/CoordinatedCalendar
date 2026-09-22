@@ -61,9 +61,11 @@ trap detach EXIT
 # this runs, macOS asks to let the terminal control Finder; without that the image still works, just with
 # Finder's default window.
 # Finder notices a newly mounted disk a moment after it mounts; asking before then fails with "Can't get disk".
-for _ in $(seq 1 20); do
+# Both the disk and the background file: styling the window before Finder can see the file fails with
+# -1700 or -10006, which is how a release once shipped with Finder's default window.
+for _ in $(seq 1 40); do
   [[ "${COORDINATEDCALENDAR_SKIP_LAYOUT:-}" == 1 ]] && break
-  [[ "$(osascript -e "tell application \"Finder\" to exists disk \"$VOLUME\"" 2>/dev/null)" == true ]] && break
+  [[ "$(osascript -e "tell application \"Finder\" to exists file \".background:background.tiff\" of disk \"$VOLUME\"" 2>/dev/null)" == true ]] && break
   sleep 0.5
 done
 STYLED=yes
@@ -82,8 +84,16 @@ tell application "Finder"
     set arrangement of viewOptions to not arranged
     set icon size of viewOptions to 128
     set text size of viewOptions to 13
-    -- By full path: the relative form (file ".background:background.tiff") fails intermittently with -10006.
-    set background picture of viewOptions to (POSIX file "$MOUNT/.background/background.tiff" as alias)
+    -- Finder accepts a different one of these on different runs (-10006, -1700), so try each.
+    try
+      set background picture of viewOptions to file "background.tiff" of folder ".background" of container window
+    on error
+      try
+        set background picture of viewOptions to file ".background:background.tiff"
+      on error
+        set background picture of viewOptions to (POSIX file "$MOUNT/.background/background.tiff")
+      end try
+    end try
     set position of item "CoordinatedCalendar.app" of container window to {$APP_X, $ICONS_Y}
     set position of item "Applications" of container window to {$APPLICATIONS_X, $ICONS_Y}
     close
@@ -97,6 +107,14 @@ APPLESCRIPT
 )"; then
   STYLED=no
   echo "Finder could not lay out the window: $LAYOUT_ERROR" >&2
+fi
+if [[ "$STYLED" == no ]]; then
+  # A plain window has no drag-to-Applications arrow and no first-launch instructions, so this is not
+  # something to publish. COORDINATEDCALENDAR_SKIP_LAYOUT=1 is the deliberate way to build without them.
+  detach
+  trap - EXIT
+  echo "Not building an image without its window layout. Retry, or set COORDINATEDCALENDAR_SKIP_LAYOUT=1." >&2
+  exit 1
 fi
 # Laying out the window gives the app bundle a com.apple.FinderInfo attribute. It is outside the signature,
 # but strict verification rejects it ("detritus not allowed"), and it would be copied into Applications.
