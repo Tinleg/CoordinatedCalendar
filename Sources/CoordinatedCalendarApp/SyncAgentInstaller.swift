@@ -163,7 +163,10 @@ enum SyncAgentInstaller {
             "StartInterval": interval,
             "RunAtLoad": runAtLoad,
             "StandardOutPath": home.appendingPathComponent("Library/Logs/\(label).log").path,
-            "StandardErrorPath": home.appendingPathComponent("Library/Logs/\(label).err.log").path
+            "StandardErrorPath": home.appendingPathComponent("Library/Logs/\(label).err.log").path,
+            // Ties the job to the app, so macOS names CoordinatedCalendar in "Background Items Added" and
+            // in System Settings > General > Login Items, instead of an unattributed item that looks suspect.
+            "AssociatedBundleIdentifiers": [Bundle.main.bundleIdentifier ?? "io.github.tinleg.coordinatedcalendar"]
         ]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: plistURL, options: [.atomic])
