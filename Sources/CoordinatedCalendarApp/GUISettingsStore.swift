@@ -94,18 +94,7 @@ extension GUISettings {
     }
 
     func fanInSettings(sourceKey: String, consolidatedKey: String, startDate: Date, endDate: Date, dryRun: Bool) -> BridgeSettings {
-        BridgeSettings(
-            sourceCalendarKey: sourceKey,
-            destinationCalendarKey: consolidatedKey,
-            startDate: startDate,
-            endDate: endDate,
-            transform: TransformSettings(includeSourceCalendarInTitle: true, destinationAvailability: .preserve),
-            dryRun: dryRun,
-            updateExistingCopies: true,
-            skipBridgeCreatedSourceEvents: true,
-            skipWhenSourceOriginMatchesDestination: false,
-            reconcileDeletions: true
-        )
+        .fanIn(sourceKey: sourceKey, consolidatedKey: consolidatedKey, startDate: startDate, endDate: endDate, dryRun: dryRun)
     }
 
     func fanOutSettings(
@@ -116,23 +105,16 @@ extension GUISettings {
         endDate: Date,
         dryRun: Bool
     ) -> BridgeSettings {
-        BridgeSettings(
-            sourceCalendarKey: consolidatedKey,
-            destinationCalendarKey: destinationKey,
+        .fanOut(
+            consolidatedKey: consolidatedKey,
+            destinationKey: destinationKey,
+            availability: availability,
+            title: effectiveFanOutTitle,
+            skipFreeEvents: skipFreeEvents ?? true,
+            skipDeclinedEvents: skipDeclinedEvents ?? true,
             startDate: startDate,
             endDate: endDate,
-            transform: TransformSettings(
-                copyAsFreeBusyOnly: true,
-                freeBusyTitle: effectiveFanOutTitle,
-                destinationAvailability: availability
-            ),
-            dryRun: dryRun,
-            updateExistingCopies: true,
-            skipBridgeCreatedSourceEvents: false,
-            skipWhenSourceOriginMatchesDestination: true,
-            reconcileDeletions: true,
-            skipFreeSourceEvents: skipFreeEvents ?? true,
-            skipDeclinedSourceEvents: skipDeclinedEvents ?? true
+            dryRun: dryRun
         )
     }
 }

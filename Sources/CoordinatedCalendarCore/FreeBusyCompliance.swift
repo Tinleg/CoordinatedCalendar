@@ -8,7 +8,7 @@ public enum FreeBusyCompliance {
 
     /// Describes each field on a free/busy copy that must be stripped. `expectedTitle` is nil when the
     /// title is intentionally source-derived (the `--origin-title` copy option), so it is not checked.
-    public static func violations(of event: EKEvent, expectedTitle: String?) -> [String] {
+    public static func violations(of event: any StoredEvent, expectedTitle: String?) -> [String] {
         var violations: [String] = []
         if BridgeEventMetadata.parse(from: event.notes)?.carriesSourceReference == true {
             // Clear-text source references belong to the consolidated calendar alone. One here means
@@ -38,7 +38,7 @@ public enum FreeBusyCompliance {
     }
 
     /// Strips a non-recurring free/busy copy in place. Recurring copies are removed and recreated instead.
-    public static func strip(_ event: EKEvent, metadata: BridgeEventMetadata, expectedTitle: String?) {
+    public static func strip(_ event: any StoredEvent, metadata: BridgeEventMetadata, expectedTitle: String?) {
         if let expectedTitle {
             event.title = expectedTitle
         }

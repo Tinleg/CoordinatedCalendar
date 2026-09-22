@@ -65,7 +65,7 @@ public enum EventDetailsSummary {
         return ([header] + lines).joined(separator: "\n")
     }
 
-    public static func text(for event: EKEvent) -> String? {
+    public static func text(for event: any StoredEvent) -> String? {
         let organizer = event.organizer.map(participant(_:))
         let attendees = (event.attendees ?? [])
             .filter { $0.url != event.organizer?.url }
@@ -80,7 +80,7 @@ public enum EventDetailsSummary {
     }
 
     /// Whether you are an attendee of `event` and declined it.
-    public static func declinedByCurrentUser(_ event: EKEvent) -> Bool {
+    public static func declinedByCurrentUser(_ event: any StoredEvent) -> Bool {
         event.attendees?.contains { $0.isCurrentUser && $0.participantStatus == .declined } ?? false
     }
 

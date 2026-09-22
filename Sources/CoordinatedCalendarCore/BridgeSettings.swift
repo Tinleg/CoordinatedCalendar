@@ -172,3 +172,55 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
         self.skipDeclinedSourceEvents = skipDeclinedSourceEvents
     }
 }
+
+/// The two kinds of run a consolidated sync is made of. The app builds every route from these, and the
+/// engine tests run them, so what is tested is what runs.
+extension BridgeSettings {
+    /// A contributor's events into the consolidated calendar, with full details.
+    public static func fanIn(sourceKey: String, consolidatedKey: String, startDate: Date, endDate: Date, dryRun: Bool) -> BridgeSettings {
+        BridgeSettings(
+            sourceCalendarKey: sourceKey,
+            destinationCalendarKey: consolidatedKey,
+            startDate: startDate,
+            endDate: endDate,
+            transform: TransformSettings(includeSourceCalendarInTitle: true, destinationAvailability: .preserve),
+            dryRun: dryRun,
+            updateExistingCopies: true,
+            skipBridgeCreatedSourceEvents: true,
+            skipWhenSourceOriginMatchesDestination: false,
+            reconcileDeletions: true
+        )
+    }
+
+    /// The consolidated calendar out to a recipient, as busy blocks.
+    public static func fanOut(
+        consolidatedKey: String,
+        destinationKey: String,
+        availability: DestinationAvailability,
+        title: String = FreeBusyCompliance.fanOutTitle,
+        skipFreeEvents: Bool = true,
+        skipDeclinedEvents: Bool = true,
+        startDate: Date,
+        endDate: Date,
+        dryRun: Bool
+    ) -> BridgeSettings {
+        BridgeSettings(
+            sourceCalendarKey: consolidatedKey,
+            destinationCalendarKey: destinationKey,
+            startDate: startDate,
+            endDate: endDate,
+            transform: TransformSettings(
+                copyAsFreeBusyOnly: true,
+                freeBusyTitle: title,
+                destinationAvailability: availability
+            ),
+            dryRun: dryRun,
+            updateExistingCopies: true,
+            skipBridgeCreatedSourceEvents: false,
+            skipWhenSourceOriginMatchesDestination: true,
+            reconcileDeletions: true,
+            skipFreeSourceEvents: skipFreeEvents,
+            skipDeclinedSourceEvents: skipDeclinedEvents
+        )
+    }
+}

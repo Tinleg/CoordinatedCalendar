@@ -4,19 +4,21 @@ import Foundation
 public final class CoordinatedCalendarEngine: @unchecked Sendable {
     public typealias ProgressHandler = @Sendable (Double, String) -> Void
 
-    public let store: EKEventStore
+    public let store: any CalendarEventStore
     private let ledger: MappingLedger
     /// Copies a dry run would re-link, by the copy ID they would be given, so the same dry run reports
     /// them as updated rather than as a deletion plus a creation. Reset at the start of every run.
-    private var dryRunRelinks: [String: EKEvent] = [:]
+    private var dryRunRelinks: [String: any StoredEvent] = [:]
+    /// Mappings a dry run would move to their event's new start (see `followMovedEvents`), by new ID.
+    private var dryRunMoves: [String: EventMapping] = [:]
 
-    public init(store: EKEventStore = EKEventStore(), ledger: MappingLedger) {
+    public init(store: any CalendarEventStore = EventKitStore(), ledger: MappingLedger) {
         self.store = store
         self.ledger = ledger
     }
 
     public func requestAccess() async throws -> Bool {
-        try await store.requestFullAccessToEvents()
+        try await store.requestAccess()
     }
 
     public func authorizationStatus() -> EKAuthorizationStatus {
@@ -24,25 +26,24 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     public func calendars() -> [CalendarIdentity] {
-        store.calendars(for: .event)
-            .map(CalendarIdentity.init(calendar:))
+        store.eventCalendars()
+            .map(\.identity)
             .sorted { lhs, rhs in
                 lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
             }
     }
 
-    public func calendar(for identityKey: String) -> EKCalendar? {
-        store.calendars(for: .event).first { CalendarIdentity(calendar: $0).stableKey == identityKey }
+    public func calendar(for identityKey: String) -> (any StoredCalendar)? {
+        store.eventCalendars().first { $0.identity.stableKey == identityKey }
     }
 
     /// All events in the window. EventKit matches at most four years per predicate and silently drops the
     /// rest, so this fetches in slices and drops the duplicates of events that span a slice boundary.
-    public func events(from start: Date, to end: Date, calendars: [EKCalendar]) -> [EKEvent] {
+    public func events(from start: Date, to end: Date, calendars: [any StoredCalendar]) -> [any StoredEvent] {
         var seen = Set<String>()
-        var events: [EKEvent] = []
+        var events: [any StoredEvent] = []
         for slice in Self.fetchSlices(from: start, to: end) {
-            let predicate = store.predicateForEvents(withStart: slice.start, end: slice.end, calendars: calendars)
-            for event in store.events(matching: predicate) {
+            for event in store.events(from: slice.start, to: slice.end, in: calendars) {
                 let key = "\(event.eventIdentifier ?? event.calendarItemIdentifier)|\(event.startDate.timeIntervalSince1970)"
                 if seen.insert(key).inserted {
                     events.append(event)
@@ -66,7 +67,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         return slices
     }
 
-    public func validate(settings: BridgeSettings) throws -> (EKCalendar, EKCalendar) {
+    public func validate(settings: BridgeSettings) throws -> (any StoredCalendar, any StoredCalendar) {
         guard settings.endDate > settings.startDate else { throw BridgeError.dateWindowInvalid }
         guard let sourceKey = settings.sourceCalendarKey else { throw BridgeError.sourceCalendarMissing }
         guard let destinationKey = settings.destinationCalendarKey else { throw BridgeError.destinationCalendarMissing }
@@ -74,7 +75,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         guard let source = calendar(for: sourceKey) else { throw BridgeError.sourceCalendarMissing }
         guard let destination = calendar(for: destinationKey) else { throw BridgeError.destinationCalendarMissing }
         guard destination.allowsContentModifications else {
-            throw BridgeError.destinationCalendarReadOnly(CalendarIdentity(calendar: destination).displayName)
+            throw BridgeError.destinationCalendarReadOnly(destination.identity.displayName)
         }
         return (source, destination)
     }
@@ -82,11 +83,12 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     public func run(settings: BridgeSettings, progress: ProgressHandler? = nil) async -> SyncResult {
         var result = SyncResult()
         dryRunRelinks = [:]
+        dryRunMoves = [:]
 
         do {
             let (source, destination) = try validate(settings: settings)
-            let sourceKey = CalendarIdentity(calendar: source).stableKey
-            let destinationKey = CalendarIdentity(calendar: destination).stableKey
+            let sourceKey = source.identity.stableKey
+            let destinationKey = destination.identity.stableKey
             let allEvents = self.events(from: settings.startDate, to: settings.endDate, calendars: [source]).sorted { $0.startDate < $1.startDate }
             result.scanned = allEvents.count
             // Non-blocking events are treated as absent, so deletion cleanup also removes their existing copies.
@@ -164,8 +166,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
         do {
             let (source, destination) = try validate(settings: settings)
-            let sourceKey = CalendarIdentity(calendar: source).stableKey
-            let destinationKey = CalendarIdentity(calendar: destination).stableKey
+            let sourceKey = source.identity.stableKey
+            let destinationKey = destination.identity.stableKey
             let events = self.events(from: settings.startDate, to: settings.endDate, calendars: [source]).sorted { $0.startDate < $1.startDate }
             result.scanned = events.count
             progress?(0, "Reconciling deletions")
@@ -200,8 +202,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
         do {
             let (source, destination) = try validate(settings: settings)
-            let sourceKey = CalendarIdentity(calendar: source).stableKey
-            let destinationKey = CalendarIdentity(calendar: destination).stableKey
+            let sourceKey = source.identity.stableKey
+            let destinationKey = destination.identity.stableKey
             let events = self.events(from: settings.startDate, to: settings.endDate, calendars: [source]).sorted { $0.startDate < $1.startDate }
             result.scanned = events.count
 
@@ -259,13 +261,13 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         progress: ProgressHandler? = nil
     ) async -> SyncResult {
         var result = SyncResult()
-        let calendars = store.calendars(for: .event).filter(\.allowsContentModifications)
+        let calendars = store.eventCalendars().filter(\.allowsContentModifications)
 
         for (index, calendar) in calendars.enumerated() {
             if Task.isCancelled {
                 break
             }
-            let identity = CalendarIdentity(calendar: calendar)
+            let identity = calendar.identity
             progress?(Double(index) / Double(max(calendars.count, 1)), identity.displayName)
             var removedSeries = Set<String>()
 
@@ -295,7 +297,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                     continue
                 }
                 do {
-                    try store.remove(event, span: event.hasRecurrenceRules ? .futureEvents : .thisEvent, commit: true)
+                    try store.remove(event, futureEvents: event.hasRecurrenceRules)
                 } catch {
                     result.failed += 1
                     result.previews.append(SyncEventPreview(
@@ -333,10 +335,10 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func process(
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         sourceCalendarKey: String,
         destinationCalendarKey: String,
-        destinationCalendar: EKCalendar,
+        destinationCalendar: any StoredCalendar,
         settings: BridgeSettings,
         result: inout SyncResult
     ) {
@@ -495,7 +497,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                         metadata: metadata
                     )
                     do {
-                        try store.save(destinationEvent, span: .thisEvent, commit: true)
+                        try store.save(destinationEvent)
                         upsertLedgerMapping(
                             sourceEvent: sourceEvent,
                             sourceCalendarKey: sourceCalendarKey,
@@ -542,7 +544,12 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             destinationCalendarKey: destinationCalendarKey,
             sourceEventIdentifier: sourceEvent.eventIdentifier,
             sourceStartDate: sourceEvent.startDate
-        ) {
+        ) ?? (settings.dryRun ? dryRunMoves[EventMapping.makeID(
+            sourceCalendarKey: sourceCalendarKey,
+            destinationCalendarKey: destinationCalendarKey,
+            sourceEventIdentifier: sourceEvent.eventIdentifier,
+            sourceStartDate: sourceEvent.startDate
+        )] : nil) {
             guard let destinationEvent = store.event(withIdentifier: existing.destinationEventIdentifier) else {
                 appendCreatePreview(
                     sourceEvent: sourceEvent,
@@ -611,7 +618,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                             )
                         )
                         do {
-                            try store.save(destinationEvent, span: .thisEvent, commit: true)
+                            try store.save(destinationEvent)
                             var updated = existing
                             updated.updatedAt = Date()
                             ledger.upsert(updated)
@@ -686,7 +693,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                         )
                     )
                     do {
-                        try store.save(destinationEvent, span: .thisEvent, commit: true)
+                        try store.save(destinationEvent)
                         var updated = existing
                         updated.fingerprint = fingerprint
                         updated.sourceLastModifiedDate = sourceEvent.lastModifiedDate
@@ -759,7 +766,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     private func enforceCopyShape(
         sourceCalendarKey: String,
         destinationCalendarKey: String,
-        destinationCalendar: EKCalendar,
+        destinationCalendar: any StoredCalendar,
         settings: BridgeSettings,
         result: inout SyncResult
     ) {
@@ -771,7 +778,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             ? nil
             : settings.transform.destinationTitle(for: "")
         var removedSeries = Set<String>()
-        let routeCopies: [(event: EKEvent, metadata: BridgeEventMetadata)] = events(
+        let routeCopies: [(event: any StoredEvent, metadata: BridgeEventMetadata)] = events(
             from: settings.startDate,
             to: settings.endDate,
             calendars: [destinationCalendar]
@@ -815,7 +822,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                 continue
             }
             do {
-                try store.remove(event, span: .thisEvent, commit: true)
+                try store.remove(event, futureEvents: false)
             } catch {
                 result.failed += 1
                 result.previews.append(SyncEventPreview(
@@ -876,16 +883,16 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
             do {
                 if recurring {
-                    try store.remove(event, span: .futureEvents, commit: true)
+                    try store.remove(event, futureEvents: true)
                 } else if freeBusy {
                     FreeBusyCompliance.strip(event, metadata: metadata, expectedTitle: expectedTitle)
                     if settings.transform.markFreeBusyEventsPrivate {
-                        markPrivateIfSupported(event)
+                        event.markPrivateIfSupported()
                     }
-                    try store.save(event, span: .thisEvent, commit: true)
+                    try store.save(event)
                 } else {
                     event.notes = BridgeEventMetadata.notesByAddingMarker(to: event.notes, metadata: metadata)
-                    try store.save(event, span: .thisEvent, commit: true)
+                    try store.save(event)
                 }
             } catch {
                 result.failed += 1
@@ -937,7 +944,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func reconcileDeletedCopies(
-        sourceEvents: [EKEvent],
+        sourceEvents: [any StoredEvent],
         sourceCalendarKey: String,
         destinationCalendarKey: String,
         settings: BridgeSettings,
@@ -968,9 +975,16 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             startDate: settings.startDate,
             endDate: settings.endDate
         )
-        var reconciledDestinationIdentifiers = Set<String>()
+        var reconciledDestinationIdentifiers = followMovedEvents(
+            staleMappings: trackedMappings.filter { !currentMappingIDs.contains($0.id) },
+            sourceEvents: sourceEvents,
+            settings: settings
+        )
 
         for mapping in trackedMappings where !currentMappingIDs.contains(mapping.id) {
+            if reconciledDestinationIdentifiers.contains(mapping.destinationEventIdentifier) {
+                continue
+            }
             guard let destinationEvent = store.event(withIdentifier: mapping.destinationEventIdentifier) else {
                 result.skipped += 1
                 result.previews.append(SyncEventPreview(
@@ -1007,7 +1021,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             }
 
             do {
-                try store.remove(destinationEvent, span: .thisEvent, commit: true)
+                try store.remove(destinationEvent, futureEvents: false)
                 ledger.remove(id: mapping.id)
             } catch {
                 result.failed += 1
@@ -1027,7 +1041,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         let destinationCalendar = calendar(for: destinationCalendarKey)
         if let destinationCalendar {
             var routeCopyIdentities = Set<String>()
-            var orphans: [(event: EKEvent, metadata: BridgeEventMetadata)] = []
+            var orphans: [(event: any StoredEvent, metadata: BridgeEventMetadata)] = []
             for destinationEvent in self.events(from: settings.startDate, to: settings.endDate, calendars: [destinationCalendar]) {
                 guard let metadata = BridgeEventMetadata.parse(from: destinationEvent.notes),
                       BridgeEventMetadata.storedName(metadata.sourceCalendarName, matches: sourceCalendarName),
@@ -1070,7 +1084,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
                 }
 
                 do {
-                    try store.remove(destinationEvent, span: .thisEvent, commit: true)
+                    try store.remove(destinationEvent, futureEvents: false)
                 } catch {
                     result.failed += 1
                     result.previews.append(SyncEventPreview(
@@ -1088,6 +1102,51 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         }
     }
 
+    /// Keeps the copies of an event that was moved rather than deleted. A copy's identity includes its
+    /// source's start, which is what tells a recurring series' occurrences apart; so moving a meeting made
+    /// its copies look orphaned, and they were deleted and recreated under new event IDs in the
+    /// consolidated calendar and every busy-block calendar. A non-recurring event keeps its identifier
+    /// when it moves, so a mapping whose event is still here, alone and non-recurring, is moved to the new
+    /// start with its old fingerprint, and the normal update that follows rewrites the copy in place.
+    /// Returns the destination events kept this way, which the deletion passes must leave alone.
+    private func followMovedEvents(
+        staleMappings: [EventMapping],
+        sourceEvents: [any StoredEvent],
+        settings: BridgeSettings
+    ) -> Set<String> {
+        let byIdentifier = Dictionary(grouping: sourceEvents) { $0.eventIdentifier ?? $0.calendarItemIdentifier }
+        var kept = Set<String>()
+        for mapping in staleMappings {
+            guard let matches = byIdentifier[mapping.sourceEventIdentifier], matches.count == 1,
+                  let moved = matches.first, !moved.hasRecurrenceRules,
+                  store.event(withIdentifier: mapping.destinationEventIdentifier) != nil
+            else {
+                continue
+            }
+            let followed = EventMapping(
+                sourceCalendarKey: mapping.sourceCalendarKey,
+                destinationCalendarKey: mapping.destinationCalendarKey,
+                sourceEventIdentifier: mapping.sourceEventIdentifier,
+                sourceStartDate: moved.startDate,
+                sourceLastModifiedDate: mapping.sourceLastModifiedDate,
+                fingerprint: mapping.fingerprint,
+                destinationEventIdentifier: mapping.destinationEventIdentifier,
+                copyMode: mapping.copyMode,
+                createdAt: mapping.createdAt
+            )
+            // A mapping already at the new start means the copy there is the live one; this one is stale.
+            guard ledger.mappings[followed.id] == nil else { continue }
+            kept.insert(mapping.destinationEventIdentifier)
+            if settings.dryRun {
+                dryRunMoves[followed.id] = followed
+            } else {
+                ledger.remove(id: mapping.id)
+                ledger.upsert(followed)
+            }
+        }
+        return kept
+    }
+
     /// Re-links copies whose source changed identity without changing, instead of deleting and recreating
     /// them. Removing and re-adding an account regenerates every event's identifiers, so each copy's
     /// recorded source looks deleted and the same event looks new; left alone, that deletes and recreates
@@ -1095,8 +1154,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     /// the match is exact and one-to-one (see `relinks`); anything else keeps the old delete-and-create.
     /// The copy keeps its old fingerprint, so the normal update that follows refreshes it in place.
     private func relinkOrphanedCopies(
-        orphans: [(event: EKEvent, metadata: BridgeEventMetadata)],
-        sourceEvents: [EKEvent],
+        orphans: [(event: any StoredEvent, metadata: BridgeEventMetadata)],
+        sourceEvents: [any StoredEvent],
         claimedIdentities: Set<String>,
         sourceCalendarKey: String,
         destinationCalendarKey: String,
@@ -1107,7 +1166,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         let sourceCalendarName = calendarDisplayName(for: sourceCalendarKey)
         let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
         let copyMode = settings.transform.copyAsFreeBusyOnly ? "freeBusy" : "details"
-        func identity(of event: EKEvent) -> String {
+        func identity(of event: any StoredEvent) -> String {
             BridgeEventMetadata.makeSourceIdentity(
                 sourceCalendarName: sourceCalendarName,
                 sourceEventExternalIdentifier: event.calendarItemExternalIdentifier,
@@ -1185,7 +1244,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             }
             copy.event.notes = BridgeEventMetadata.notesByAddingMarker(to: copy.event.notes, metadata: metadata)
             do {
-                try store.save(copy.event, span: .thisEvent, commit: true)
+                try store.save(copy.event)
                 ledger.removeMappings(destinationCalendarKey: destinationCalendarKey,
                                       destinationEventIdentifier: copy.event.eventIdentifier)
             } catch {
@@ -1244,7 +1303,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func deleteDestinationCopy(
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         sourceCalendarKey: String,
         destinationCalendarKey: String,
         settings: BridgeSettings,
@@ -1309,7 +1368,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         }
 
         do {
-            try store.remove(destinationEvent, span: .thisEvent, commit: true)
+            try store.remove(destinationEvent, futureEvents: false)
             ledger.remove(id: mapping.id)
         } catch {
             result.failed += 1
@@ -1327,7 +1386,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func appendCreatePreview(
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         destinationTitle: String,
         sourceCalendarName: String,
         destinationCalendarName: String,
@@ -1353,10 +1412,10 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func createCopy(
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         sourceCalendarKey: String,
         destinationCalendarKey: String,
-        destinationCalendar: EKCalendar,
+        destinationCalendar: any StoredCalendar,
         fingerprint: String,
         sourceCalendarName: String,
         originCalendarName: String?,
@@ -1365,7 +1424,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         settings: BridgeSettings,
         result: inout SyncResult
     ) {
-        let destinationEvent = EKEvent(eventStore: store)
+        let destinationEvent = store.makeEvent()
         let destinationCalendarName = calendarDisplayName(for: destinationCalendarKey)
         let copyMode = settings.transform.copyAsFreeBusyOnly ? "freeBusy" : "details"
         apply(
@@ -1390,7 +1449,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         )
 
         do {
-            try store.save(destinationEvent, span: .thisEvent, commit: true)
+            try store.save(destinationEvent)
             upsertLedgerMapping(
                 sourceEvent: sourceEvent,
                 sourceCalendarKey: sourceCalendarKey,
@@ -1415,15 +1474,15 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     }
 
     private func apply(
-        sourceEvent: EKEvent,
-        to destinationEvent: EKEvent,
-        destinationCalendar: EKCalendar,
+        sourceEvent: any StoredEvent,
+        to destinationEvent: any StoredEvent,
+        destinationCalendar: any StoredCalendar,
         transform: TransformSettings,
         sourceCalendarName: String,
         originCalendarName: String?,
         metadata: BridgeEventMetadata? = nil
     ) {
-        destinationEvent.calendar = destinationCalendar
+        destinationEvent.place(in: destinationCalendar)
         destinationEvent.title = transform.destinationTitle(
             for: sourceEvent.title ?? "Untitled",
             sourceCalendarName: sourceCalendarName,
@@ -1441,7 +1500,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             destinationEvent.availability = availability
         }
         if transform.copyAsFreeBusyOnly, transform.markFreeBusyEventsPrivate {
-            markPrivateIfSupported(destinationEvent)
+            destinationEvent.markPrivateIfSupported()
         }
         let copiesLocation = !transform.copyAsFreeBusyOnly && transform.copyLocation
         if copiesLocation, let place = EventFingerprint.geoPlace(of: sourceEvent) {
@@ -1479,33 +1538,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         }
     }
 
-    private func markPrivateIfSupported(_ event: EKEvent) {
-        let allowsSelector = Selector(("allowsPrivacyLevelModifications"))
-        let setterSelector = Selector(("setPrivacyLevel:"))
-        guard event.responds(to: allowsSelector), event.responds(to: setterSelector) else {
-            return
-        }
-
-        typealias AllowsPrivacyGetter = @convention(c) (AnyObject, Selector) -> Bool
-        typealias PrivacySetter = @convention(c) (AnyObject, Selector, Int) -> Void
-
-        let allowsPrivacy = unsafeBitCast(
-            event.method(for: allowsSelector),
-            to: AllowsPrivacyGetter.self
-        )
-        guard allowsPrivacy(event, allowsSelector) else {
-            return
-        }
-
-        let setPrivacy = unsafeBitCast(
-            event.method(for: setterSelector),
-            to: PrivacySetter.self
-        )
-        setPrivacy(event, setterSelector, 2)
-    }
-
     /// Why a source event should not produce a copy under the run's skip settings, or nil to copy it.
-    private func nonBlockingReason(for event: EKEvent, settings: BridgeSettings) -> String? {
+    private func nonBlockingReason(for event: any StoredEvent, settings: BridgeSettings) -> String? {
         let metadata = BridgeEventMetadata.parse(from: event.notes)
         if settings.skipDeclinedSourceEvents,
            metadata?.declined == true || EventDetailsSummary.declinedByCurrentUser(event) {
@@ -1527,7 +1561,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         originCalendarKey: String,
         copyMode: String,
         fingerprint: String,
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         transform: TransformSettings
     ) -> BridgeEventMetadata {
         let detailsCopy = namesSourceInTheClear(copyMode)
@@ -1571,19 +1605,18 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
     private func findExistingCopyBySyncedMetadata(
         copyIDs: [String],
-        sourceEvent: EKEvent,
-        destinationCalendar: EKCalendar
-    ) -> EKEvent? {
+        sourceEvent: any StoredEvent,
+        destinationCalendar: any StoredCalendar
+    ) -> (any StoredEvent)? {
         let start = sourceEvent.startDate.addingTimeInterval(-60)
         let end = sourceEvent.endDate.addingTimeInterval(60)
-        let predicate = store.predicateForEvents(withStart: start, end: end, calendars: [destinationCalendar])
-        return store.events(matching: predicate).first {
+        return store.events(from: start, to: end, in: [destinationCalendar]).first {
             BridgeEventMetadata.parse(from: $0.notes).map { copyIDs.contains($0.copyID) } ?? false
         }
     }
 
     private func sourceOriginMatchesDestination(
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         sourceCalendarKey: String,
         destinationCalendarKey: String
     ) -> Bool {
@@ -1605,7 +1638,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         return false
     }
 
-    private func originCalendarKey(forSourceEvent sourceEvent: EKEvent, fallback sourceCalendarKey: String) -> String {
+    private func originCalendarKey(forSourceEvent sourceEvent: any StoredEvent, fallback sourceCalendarKey: String) -> String {
         if let key = liveLedgerOriginKey(forSourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey) {
             return key
         }
@@ -1620,24 +1653,24 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
     /// calendar keys, and removing and re-adding an account gives its calendars new keys. A stale key names
     /// nothing; trusting it made an account's own events look foreign and sent them back to it as busy
     /// blocks, and made the raw key string stand in for the origin's name (2026-09-21).
-    private func liveLedgerOriginKey(forSourceEvent sourceEvent: EKEvent, sourceCalendarKey: String) -> String? {
+    private func liveLedgerOriginKey(forSourceEvent sourceEvent: any StoredEvent, sourceCalendarKey: String) -> String? {
         let live = Set(calendars().map(\.stableKey))
         return ledger.mappingsForDestinationEvent(calendarKey: sourceCalendarKey, eventIdentifier: sourceEvent.eventIdentifier)
             .map(\.sourceCalendarKey)
             .first { live.contains($0) }
     }
 
-    private func markerOriginName(of event: EKEvent) -> String? {
+    private func markerOriginName(of event: any StoredEvent) -> String? {
         BridgeEventMetadata.parse(from: event.notes).flatMap {
             BridgeEventMetadata.resolveStoredName($0.originCalendarName, among: calendars().map(\.displayName))
         }
     }
 
     private func upsertLedgerMapping(
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         sourceCalendarKey: String,
         destinationCalendarKey: String,
-        destinationEvent: EKEvent,
+        destinationEvent: any StoredEvent,
         fingerprint: String,
         copyMode: String
     ) {
@@ -1653,7 +1686,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         ))
     }
 
-    private func originCalendarName(forSourceEvent sourceEvent: EKEvent, sourceCalendarKey: String) -> String? {
+    private func originCalendarName(forSourceEvent sourceEvent: any StoredEvent, sourceCalendarKey: String) -> String? {
         if let key = liveLedgerOriginKey(forSourceEvent: sourceEvent, sourceCalendarKey: sourceCalendarKey) {
             return calendarDisplayName(for: key)
         }
@@ -1700,8 +1733,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
     private func eventAvailability(
         for availability: DestinationAvailability,
-        sourceEvent: EKEvent,
-        destinationCalendar: EKCalendar
+        sourceEvent: any StoredEvent,
+        destinationCalendar: any StoredCalendar
     ) -> EKEventAvailability? {
         let target: EKEventAvailability?
         switch availability {
@@ -1724,7 +1757,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
 
     private func intendedAvailabilityName(
         for availability: DestinationAvailability,
-        sourceEvent: EKEvent,
+        sourceEvent: any StoredEvent,
         sourceMetadata: BridgeEventMetadata?
     ) -> String? {
         switch availability {
@@ -1757,7 +1790,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         }
     }
 
-    private func sourceAvailabilityDisplayName(for event: EKEvent) -> String {
+    private func sourceAvailabilityDisplayName(for event: any StoredEvent) -> String {
         if let metadata = BridgeEventMetadata.parse(from: event.notes),
            let availability = availability(named: metadata.sourceAvailability ?? metadata.intendedAvailability) {
             return availabilityDisplayName(availability)
@@ -1765,7 +1798,7 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         return availabilityDisplayName(supportedAvailability(event.availability))
     }
 
-    private func metadataAvailability(from event: EKEvent) -> EKEventAvailability? {
+    private func metadataAvailability(from event: any StoredEvent) -> EKEventAvailability? {
         guard let metadata = BridgeEventMetadata.parse(from: event.notes) else {
             return nil
         }

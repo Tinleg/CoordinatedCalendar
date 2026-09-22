@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A moved meeting keeps its copies.** Moving an event to a new time used to delete its consolidated copy and every busy block made from it and create new ones, so their event IDs changed each time something was rescheduled. They are now updated in place. (A recurring event's occurrences share one identifier, so a moved occurrence is still replaced.)
+- **Engine tests.** The sync engine now runs against an in-memory calendar store in the tests: fan-in, fan-out, edits, moves, deletions, Free events, stripping, duplicates from two Macs, a re-added account, dry runs, failed writes and removing everything. Writing them found the moved-meeting problem above.
 - **Check for Updates** on the Status page (and `--check-for-updates`): asks GitHub for the newest release and, if there is one, offers to open its download page. An optional weekly automatic check is off by default. This is the only network request the app makes, and it sends nothing about your calendars.
 - **Copy Diagnostics** on the Status page (and `--diagnostics`): a report to attach to a bug report — versions, where the app runs from, how each kind of calendar is set up, the background jobs and recent sync results. Calendar and account names are replaced with labels, event titles are removed, and nothing is sent anywhere.
 - **A calendar that comes back under a new identifier is re-attached automatically.** Removing and re-adding an account (the usual fix when Calendar stops showing its events) gives its calendars new identifiers; the app now recognises them by name, re-attaches them with their settings, and says so. A selected calendar that is only temporarily unavailable stays selected instead of being silently dropped along with its settings.

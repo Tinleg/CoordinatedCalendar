@@ -58,6 +58,8 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 **Settings follow the calendar too.** Settings are keyed by calendar key, so they also record each selected calendar's name; a key that vanishes is re-attached to the one calendar now carrying its name, with its per-calendar settings. A selected calendar that is merely absent — an account offline for a while — stays selected and is reported, rather than being dropped as it used to be.
 
+**A moved event is followed, not replaced.** A copy's identity includes its source's start, because that is what tells a recurring series' occurrences apart. On its own that made a moved meeting look deleted and new. A non-recurring event keeps its identifier when it moves, so the ledger mapping for it is moved to the new start and the copy is updated in place. It needs the ledger: a Mac that never saw the copy replaces it.
+
 ## Copy occurrences, never recurrence rules
 
 **Decision:** EventKit expands recurring events, and each occurrence is copied as a single event. Copies never get recurrence rules; full-detail copies describe the rule in `Source details:`.

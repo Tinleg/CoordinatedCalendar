@@ -31,7 +31,7 @@ public enum EventFingerprint {
         ])
     }
 
-    public static func fingerprint(event: EKEvent, sourceCalendarKey: String) -> String {
+    public static func fingerprint(event: any StoredEvent, sourceCalendarKey: String) -> String {
         fingerprint(
             sourceCalendarKey: sourceCalendarKey,
             title: event.title ?? "",
@@ -53,7 +53,7 @@ public enum EventFingerprint {
     }
 
     public static func fingerprint(
-        event: EKEvent,
+        event: any StoredEvent,
         sourceCalendarKey: String,
         transform: TransformSettings,
         sourceCalendarName: String? = nil,
@@ -97,14 +97,14 @@ public enum EventFingerprint {
     }
 
     /// The event's structured location when it carries coordinates.
-    public static func geoPlace(of event: EKEvent) -> EKStructuredLocation? {
+    public static func geoPlace(of event: any StoredEvent) -> EKStructuredLocation? {
         guard let place = event.structuredLocation, place.geoLocation != nil else {
             return nil
         }
         return place
     }
 
-    private static func availabilityFingerprint(for event: EKEvent, transform: TransformSettings) -> String {
+    private static func availabilityFingerprint(for event: any StoredEvent, transform: TransformSettings) -> String {
         guard transform.destinationAvailability == .preserve else {
             return "forced:\(transform.destinationAvailability.rawValue)"
         }
