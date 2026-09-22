@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest something CoordinatedCalendar should do.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [Docs/ROADMAP.md](https://github.com/Tinleg/CoordinatedCalendar/blob/main/Docs/ROADMAP.md) first; it may already be planned or ruled out.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The situation and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help

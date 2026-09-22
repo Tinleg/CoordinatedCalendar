@@ -1,6 +1,6 @@
 # Security
 
-CoordinatedCalendar runs entirely on your Mac and calls no external service, but it reads every calendar you grant it and writes copies across accounts. Problems that could leak event details between accounts, delete events it did not create, or expose calendar data matter to us.
+CoordinatedCalendar runs entirely on your Mac and sends nothing about your calendars anywhere (its only network request asks GitHub for the latest release number), but it reads every calendar you grant it and writes copies across accounts. Problems that could leak event details between accounts, delete events it did not create, or expose calendar data matter to us.
 
 ## Reporting a problem
 

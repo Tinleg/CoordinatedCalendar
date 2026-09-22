@@ -231,6 +231,7 @@ struct ContentView: View {
                     Circle()
                         .fill(directionColor(for: preview))
                         .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
                     previewText(preview.action.rawValue, for: preview)
                 }
             }
@@ -505,6 +506,12 @@ struct ContentView: View {
         }
     }
 
+    private func jobStateDescription(_ job: SyncAgentInstaller.JobDetails) -> String {
+        guard job.isLoaded else { return "Not loaded" }
+        if let code = job.lastExitCode, code != "0" { return "Loaded; last run failed" }
+        return "Loaded"
+    }
+
     private func windowDaysRow(_ label: String, value: Int, range: ClosedRange<Int>, set: @escaping (Int) -> Void) -> some View {
         HStack {
             Text(label)
@@ -544,6 +551,7 @@ struct ContentView: View {
                 HStack {
                     Image(systemName: backgroundHealthProblems.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                         .foregroundStyle(backgroundHealthProblems.isEmpty ? .green : .orange)
+                        .accessibilityHidden(true)
                     Text(backgroundHealthProblems.isEmpty ? "Healthy" : "Needs attention")
                         .font(.headline)
                     Spacer()
@@ -598,6 +606,9 @@ struct ContentView: View {
                             Image(systemName: job.isLoaded ? "circle.fill" : "circle")
                                 .foregroundStyle(job.isLoaded ? (job.lastExitCode.map { $0 == "0" } ?? true ? .green : .orange) : .secondary)
                                 .font(.caption)
+                                // The dot's colour is the only place this state shows, so say it.
+                                .help(jobStateDescription(job))
+                                .accessibilityLabel(jobStateDescription(job))
                             Text(jobTitle(job))
                                 .font(.headline)
                             Text(job.label)

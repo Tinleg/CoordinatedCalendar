@@ -19,3 +19,27 @@ jobs:
         run: swift test
       - name: Build release
         run: swift build -c release
+
+  package:
+    # Builds the app bundle and disk image the way a release does, so a packaging break shows up on the
+    # commit that caused it instead of on release day. CI has no certificates, so the app is ad-hoc signed.
+    if: ${{ !github.event.repository.private }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Package the app
+        run: COORDINATEDCALENDAR_APP_DIR="$RUNNER_TEMP/CoordinatedCalendar.app" ./scripts/package-app.sh
+      - name: Check the bundle
+        run: |
+          APP="$RUNNER_TEMP/CoordinatedCalendar.app"
+          codesign --verify --strict "$APP"
+          codesign -dv "$APP" 2>&1 | grep -q 'flags=.*runtime' || { echo "hardened runtime missing"; exit 1; }
+          codesign -d --entitlements - --xml "$APP" 2>/dev/null | grep -q 'com.apple.security.personal-information.calendars' \
+            || { echo "Calendar entitlement missing"; exit 1; }
+          plutil -lint "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/CoordinatedCalendar.icns"
+          "$APP/Contents/MacOS/CoordinatedCalendar" --help >/dev/null
+      - name: Build the disk image
+        run: |
+          COORDINATEDCALENDAR_SKIP_LAYOUT=1 ./scripts/make-dmg.sh
+          hdiutil verify dist/CoordinatedCalendar-*.dmg

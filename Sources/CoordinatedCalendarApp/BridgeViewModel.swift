@@ -42,7 +42,9 @@ final class BridgeViewModel: ObservableObject {
     private var calendarNames: [String: String] = [:]
     /// Shown from launch, so someone who opened the app from the download or its disk image learns to move
     /// it before turning on syncing, rather than when installing the background jobs fails.
-    let installLocationWarning: String? = SyncAgentInstaller.installLocationProblem?.message
+    /// Not in demo mode, which installs nothing and is run from wherever a screenshot build lands.
+    let installLocationWarning: String? = UserDefaults.standard.bool(forKey: "demoMode")
+        ? nil : SyncAgentInstaller.installLocationProblem?.message
     /// `-demoMode YES` shows synthetic calendars for screenshots and never reads or writes calendars or settings.
     let isDemo = UserDefaults.standard.bool(forKey: "demoMode")
     @Published var result = SyncResult()

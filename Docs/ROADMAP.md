@@ -18,14 +18,19 @@ The health notification says something is wrong; it could also say which route f
 
 ## Distribution
 
-### Downloadable, notarized app
-Source-only releases ask users to build with Xcode tools. A signed, notarized DMG attached to each GitHub release would let non-developers install it. This needs an Apple Developer ID. If added, release automation should build, sign and notarize on CI.
+Releases now come with a disk image, signed with an Apple Development certificate but not notarized, so a first launch needs **Open Anyway** once; the app checks GitHub weekly for a newer release and links to it.
+
+### Notarized download
+A Developer ID certificate and notarization would remove the first-launch warning. `make-dmg.sh` already does both when the certificate and `notarytool` credentials exist. Switching signer asks every user for Calendar access once more.
 
 ### Homebrew
-A Homebrew cask (once there's a notarized build) or a formula that builds from source would make installing and updating one command.
+A cask needs a notarized build; Homebrew is removing casks that fail macOS's security check. A formula that builds from source would work without one.
 
-### Update checks
-Once there are downloadable builds, a lightweight "a new version is available" check against GitHub releases.
+### Intel Macs
+Release builds are Apple silicon only. A universal build (`swift build --arch arm64 --arch x86_64`) works, but can't be tested on this hardware without Rosetta; CI's Intel runner could cover it.
+
+### Updating in place
+The update check links to the release page. A self-updater (Sparkle) would install updates itself, at the cost of a framework, a signing key and an update feed to keep secure.
 
 ## Sync behavior
 

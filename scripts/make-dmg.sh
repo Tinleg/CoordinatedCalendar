@@ -6,10 +6,13 @@
 #
 # Signing and notarization happen when their prerequisites exist, and are reported either way:
 #   - A "Developer ID Application" certificate in the keychain signs the app (hardened runtime, secure
-#     timestamp) and the image. Without one, the current certificate is used and the image only works
-#     on Macs that already trust this developer.
+#     timestamp) and the image. Without one, the app is signed with COORDINATEDCALENDAR_SIGN_IDENTITY
+#     or the first code-signing identity (releases use the Apple Development certificate), and other
+#     Macs ask for a one-time "Open Anyway" in System Settings > Privacy & Security.
 #   - COORDINATEDCALENDAR_NOTARY_PROFILE, the name given to `xcrun notarytool store-credentials`,
 #     notarizes and staples the image. Without it the image is not notarized.
+#   - COORDINATEDCALENDAR_SKIP_LAYOUT=1 leaves Finder's default window, for machines where Finder
+#     cannot be scripted (CI).
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,11 +62,14 @@ trap detach EXIT
 # Finder's default window.
 # Finder notices a newly mounted disk a moment after it mounts; asking before then fails with "Can't get disk".
 for _ in $(seq 1 20); do
+  [[ "${COORDINATEDCALENDAR_SKIP_LAYOUT:-}" == 1 ]] && break
   [[ "$(osascript -e "tell application \"Finder\" to exists disk \"$VOLUME\"" 2>/dev/null)" == true ]] && break
   sleep 0.5
 done
 STYLED=yes
-if ! LAYOUT_ERROR="$(osascript 2>&1 >/dev/null <<APPLESCRIPT
+if [[ "${COORDINATEDCALENDAR_SKIP_LAYOUT:-}" == 1 ]]; then
+  STYLED="skipped"
+elif ! LAYOUT_ERROR="$(osascript 2>&1 >/dev/null <<APPLESCRIPT
 tell application "Finder"
   tell disk "$VOLUME"
     open
@@ -118,4 +124,4 @@ echo
 echo "Built $OUTPUT ($(du -h "$OUTPUT" | cut -f1 | tr -d ' '))"
 echo "  window layout: $STYLED$([[ $STYLED == no ]] && echo ' — allow your terminal to control Finder in System Settings > Privacy & Security > Automation, then rerun')"
 echo "  Developer ID signed: $SIGNED"
-echo "  notarized: $NOTARIZED$([[ $NOTARIZED == no ]] && echo ' — other Macs will block it until it is')"
+echo "  notarized: $NOTARIZED$([[ $NOTARIZED == no ]] && echo ' — other Macs need a one-time Open Anyway in System Settings > Privacy & Security')"

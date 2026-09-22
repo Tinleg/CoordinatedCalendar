@@ -35,11 +35,23 @@ The **Calendars** page shows fan-in and fan-out side by side: checked contributo
 
 ## Requirements
 
-- macOS 14 (Sonoma) or later, on a Mac that is on and awake when you want syncing to happen.
-- The Swift 6.1 toolchain or later to build it: Xcode 16.4 or later, or the Xcode Command Line Tools (`xcode-select --install`).
+- macOS 14 (Sonoma) or later, on a Mac with Apple silicon that is on and awake when you want syncing to happen. (Intel Macs can build it from source.)
+- To build it yourself instead of downloading it: the Swift 6.1 toolchain or later, from Xcode 16.4 or later or the Xcode Command Line Tools (`xcode-select --install`).
 - Your calendar accounts added in **System Settings > Internet Accounts** (or in the Calendar app), so they appear in Calendar.
 
 ## Install
+
+### Download
+
+1. Download `CoordinatedCalendar-<version>.dmg` from the [latest release](https://github.com/Tinleg/CoordinatedCalendar/releases/latest) and open it.
+2. Drag **CoordinatedCalendar** onto **Applications**.
+3. Open it from Applications. The first time, macOS says it can't check the app for malicious software, because the app isn't notarized by Apple. Click **Done** (not Move to Trash), then open **System Settings > Privacy & Security**, scroll to the message about CoordinatedCalendar and click **Open Anyway**, and confirm. You only do this once; updates signed by the same developer open normally. (On macOS 14 you can instead right-click the app, choose **Open**, and confirm.)
+
+Each release lists the disk image's SHA-256 checksum. To check your download: `shasum -a 256 ~/Downloads/CoordinatedCalendar-<version>.dmg`.
+
+Keep the app in Applications: background syncing refuses to run from Downloads or the disk image, because that copy would move or disappear. The app checks weekly for a newer version (it can be turned off); to update, download the new disk image and replace the app. Settings, the Calendar permission and background jobs carry over.
+
+### Build from source
 
 ```bash
 git clone https://github.com/Tinleg/CoordinatedCalendar.git
@@ -50,14 +62,16 @@ open ~/Applications/CoordinatedCalendar.app
 
 `verify-on-mac.sh` runs the tests, builds a release binary and installs the app at `~/Applications/CoordinatedCalendar.app` (override with `COORDINATEDCALENDAR_APP_DIR`), with `.build/CoordinatedCalendar.app` as a symlink to it. Packaging waits for a running scheduled sync to finish and swaps the new bundle in whole, so it is safe to redeploy while the background job is installed.
 
-You don't need an Apple developer account. The app is signed with your own code-signing identity if you have one; otherwise it is ad-hoc signed (see [Calendar Permission Stability](#calendar-permission-stability)). Because you built it yourself, macOS does not show a downloaded-app warning.
+You don't need an Apple developer account. The app is signed with your own code-signing identity if you have one; otherwise it is ad-hoc signed (see [Calendar Permission Stability](#calendar-permission-stability)). Because you built it yourself, macOS does not show the downloaded-app warning.
+
+### Calendar access
 
 The first time the app reads your calendars, macOS asks for Calendar access: choose **Allow Full Access**. CoordinatedCalendar needs to read every calendar and write copies and busy blocks. The first time it posts a health notification, macOS may ask whether to allow notifications. The access prompt comes up again only if the app's signing identity changes.
 
 ## Suggested Setup
 
 1. **Create a consolidation calendar.** In the Calendar app, add a new calendar under any account, for example **File > New Calendar**, named `Consolidated`. Any writable account works. iCloud is a good choice because the full consolidated view then syncs to all your Apple devices, but the calendar holds full meeting details from every account, so pick an account where that is acceptable (see [What the consolidated calendar holds](#what-the-consolidated-calendar-holds)). Reserve it for CoordinatedCalendar: events you add to it directly are treated as your own and fan out as busy blocks too.
-2. **Install CoordinatedCalendar.** Run `./scripts/verify-on-mac.sh`, then open `~/Applications/CoordinatedCalendar.app` and click **Grant Access** to give it full Calendar access.
+2. **Install CoordinatedCalendar** (see [Install](#install)), open it and click **Grant Access** to give it full Calendar access.
 3. **Set up the pages in the sidebar.**
    - **Calendars:** in the middle card, choose the **Consolidated** calendar you just created, then set the **Busy block title** (default `Busy - Other`) and whether to skip events marked Free and meetings you declined (both on by default). Hover over any of them for an explanation.
      - On the left (**Fan-In**), check every calendar whose events should be gathered.
@@ -347,16 +361,9 @@ Logs are in `~/Library/Logs/io.github.tinleg.coordinatedcalendar.*.log`. Removin
 
 ## Distribution
 
-For personal/local use, `scripts/package-app.sh` builds an ad-hoc signed app bundle that can be copied to another Mac and opened after approving macOS security prompts.
+Releases are built with `scripts/release.sh` (see [Docs/RELEASING.md](Docs/RELEASING.md)): a disk image containing the app signed with the maintainer's Apple Development certificate and the hardened runtime, but not notarized, hence the one-time **Open Anyway** step above. Signing with the same certificate every release is what keeps the Calendar permission across updates.
 
-For broader distribution, sign with a Developer ID certificate and notarize the packaged app:
-
-```bash
-codesign --force --options runtime --sign "Developer ID Application: Your Name" .build/CoordinatedCalendar.app
-ditto -c -k --keepParent .build/CoordinatedCalendar.app CoordinatedCalendar.zip
-xcrun notarytool submit CoordinatedCalendar.zip --keychain-profile YOUR_PROFILE --wait
-xcrun stapler staple .build/CoordinatedCalendar.app
-```
+To distribute your own build without that step, sign with a Developer ID certificate and notarize: `scripts/make-dmg.sh` does both when a "Developer ID Application" certificate is in the keychain and `COORDINATEDCALENDAR_NOTARY_PROFILE` names stored `notarytool` credentials.
 
 ## Safety Notes
 

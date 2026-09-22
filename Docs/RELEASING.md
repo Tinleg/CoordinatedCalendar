@@ -1,6 +1,6 @@
 # Releasing
 
-How a CoordinatedCalendar release is made. Releases are source-only snapshots of `main`, tagged `vX.Y.Z`.
+How a CoordinatedCalendar release is made. A release is a snapshot of `main`, tagged `vX.Y.Z`, with a disk image of the app attached.
 
 ## How `main`, "Unreleased" and releases relate
 
@@ -20,46 +20,42 @@ The version lives in `Packaging/Info.plist`: `CFBundleShortVersionString` is the
 
 ## Checklist
 
-1. **Changelog:** make sure every user-visible change since the last release is under `## Unreleased` in `CHANGELOG.md`, then rename that heading to the new version.
-2. **Version:** in `Packaging/Info.plist`, set `CFBundleShortVersionString` to the new version and increase `CFBundleVersion` by one:
-
-   ```bash
-   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 0.1.3" -c "Set :CFBundleVersion 4" Packaging/Info.plist
-   ```
-
-3. **Visuals:** if the icon, pages or wording changed, regenerate the assets:
+1. **Changelog:** make sure every user-visible change since the last release is under `## Unreleased` in `CHANGELOG.md`. The script turns that heading into the version and uses the section as the release notes.
+2. **Visuals:** if the icon, pages or wording changed, regenerate the assets and commit them first:
 
    ```bash
    swift scripts/generate-icon.swift
    swift scripts/generate-social-preview.swift
+   swift scripts/generate-dmg-background.swift
    ~/Applications/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar -demoMode YES -exportScreenshots /tmp/cc-shots
    ```
 
-   Copy the needed screenshots from `/tmp/cc-shots` into `Docs/images/`, scaling them to about 1300 px wide with `sips -Z 1300`.
-4. **Commit and push:** commit as "Release X.Y.Z" and push `main`.
-5. **Wait for CI:** the workflow must pass on that commit, because it builds with the oldest supported toolchain.
-6. **Tag:** tag the commit and push the tag:
+   Copy the needed screenshots from `/tmp/cc-shots` into `Docs/images/`, scaling them to about 1300 px wide with `sips -Z 1300`. The disk image background's geometry must match `make-dmg.sh`.
+3. **Release**, from an up-to-date `main` with nothing uncommitted:
 
    ```bash
-   git tag -a vX.Y.Z -m "CoordinatedCalendar X.Y.Z" <commit>
-   git push origin vX.Y.Z
+   ./scripts/release.sh X.Y.Z
    ```
 
-7. **Publish:** create the GitHub release from the tag, marked **Latest**. Use the changelog section as the notes, plus the license line and the build-from-source line from earlier releases:
+   It checks the version is newer and the changelog has something to release, then:
+   - sets `CFBundleShortVersionString` to the version and increases `CFBundleVersion` by one in `Packaging/Info.plist`, and renames `## Unreleased`;
+   - runs the tests, commits "Release X.Y.Z", pushes `main` and waits for CI to pass on that commit;
+   - builds the disk image (`scripts/make-dmg.sh`), and checks that the app inside is the new version and is signed with the release certificate;
+   - tags the commit, pushes the tag, and publishes the GitHub release, marked **Latest**, with the image attached and its SHA-256 checksum, install steps and the license line in the notes.
 
-   ```bash
-   gh release create vX.Y.Z --title "CoordinatedCalendar X.Y.Z" --latest --notes "..."
-   ```
+   It stops before tagging if anything fails. If it stops after pushing the release commit, fix the problem and release the next patch version; do not reuse the number.
+4. **Check the download:** open the release page, download the image, and open it: the "drag to Applications" window should appear with the first-launch instructions. The first run of `make-dmg.sh` asks to let the terminal control Finder, which lays out that window; without it the image still works, with Finder's default window.
+5. **Social preview:** if the preview image changed, upload `Docs/images/social-preview.png` in the repository's Settings > General > Social preview. It's a repository setting, not part of the release.
 
-8. **Disk image:** build it from the tagged commit and attach it to the release:
+## Signing
 
-   ```bash
-   COORDINATEDCALENDAR_NOTARY_PROFILE=<profile> ./scripts/make-dmg.sh
-   gh release upload vX.Y.Z dist/CoordinatedCalendar-X.Y.Z.dmg
-   ```
+Releases are signed with the maintainer's **Apple Development** certificate and the hardened runtime, and are **not notarized**; notarization needs a paid Apple Developer Program membership. So:
 
-   The script says whether the image is Developer ID signed and notarized. **Attach only an image that is both**: anything less is blocked by default on other people's Macs. Notarization needs a "Developer ID Application" certificate in the keychain and credentials stored once with `xcrun notarytool store-credentials <profile>`. The first run asks to let the terminal control Finder, which lays out the window; without it the image still works, with Finder's default window. If the background art changes, run `swift scripts/generate-dmg-background.swift`; its geometry must match `make-dmg.sh`.
-9. **Social preview:** if the preview image changed, upload `Docs/images/social-preview.png` in the repository's Settings > General > Social preview. It's a repository setting, not part of the release.
+- The first launch on another Mac is blocked until the person clicks **Open Anyway** in System Settings > Privacy & Security. The README, the disk image window and the release notes all say so.
+- Every release must be signed with **the same certificate**. macOS ties the Calendar permission to the signer; a different one makes every user grant access again. `release.sh` refuses an image signed by anything but `COORDINATEDCALENDAR_SIGN_IDENTITY` (default: the keychain's first Apple Development certificate).
+- The certificate's name, which includes the maintainer's Apple ID email, is readable in the app's signature.
+
+With a Developer ID certificate and stored `notarytool` credentials, `make-dmg.sh` signs with Developer ID and notarizes instead (`COORDINATEDCALENDAR_NOTARY_PROFILE=<profile>`), and the warning goes away. Switching to it changes the signer once, so users grant Calendar access again after that update; say so in its release notes.
 
 ## Rules
 

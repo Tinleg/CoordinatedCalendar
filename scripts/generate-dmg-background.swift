@@ -1,8 +1,8 @@
 #!/usr/bin/env swift
 
 // Renders Packaging/dmg-background.tiff, the picture behind the disk image's Finder window: an arrow from
-// the app to the Applications shortcut, and one line saying what to do. 1x and 2x in one TIFF, so it is
-// sharp on Retina displays. Run from the repository root; scripts/make-dmg.sh places the icons to match.
+// the app to the Applications shortcut, a line saying what to do, and how to get past the first-launch
+// warning. 1x and 2x in one TIFF, so it is sharp on Retina displays. Run from the repository root; scripts/make-dmg.sh places the icons to match.
 //
 // The background is light on purpose: Finder draws the icon labels itself, in black, and they would
 // disappear on the navy of the icon and social preview.
@@ -62,7 +62,19 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
             .paragraphStyle: paragraph
         ]
     )
-    text.draw(in: NSRect(x: 0, y: 58, width: width, height: 24))
+    text.draw(in: NSRect(x: 0, y: 64, width: width, height: 24))
+
+    // The app is not notarized, so macOS blocks its first launch; on macOS 15 and later, right-click
+    // Open no longer gets past that, and people give up unless told where the button is.
+    let firstLaunch = NSAttributedString(
+        string: "First launch: if macOS says it can\u{2019}t check the app, open System Settings \u{203A} Privacy & Security\nand click Open Anyway. You only need to do this once.",
+        attributes: [
+            .font: NSFont.systemFont(ofSize: 11.5),
+            .foregroundColor: NSColor(calibratedRed: 0.30, green: 0.34, blue: 0.45, alpha: 1),
+            .paragraphStyle: paragraph
+        ]
+    )
+    firstLaunch.draw(in: NSRect(x: 20, y: 18, width: width - 40, height: 36))
 
     NSGraphicsContext.restoreGraphicsState()
     return bitmap

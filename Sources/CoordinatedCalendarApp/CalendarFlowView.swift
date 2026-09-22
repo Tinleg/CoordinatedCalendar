@@ -33,6 +33,8 @@ struct CalendarFlowView: View {
                     flowLines(anchors: anchors, proxy: proxy)
                 }
                 .allowsHitTesting(false)
+                // The lines repeat what the checkboxes say; VoiceOver reads those instead.
+                .accessibilityHidden(true)
             }
             .animation(.easeInOut(duration: 0.25), value: viewModel.contributorCalendarKeys)
             .animation(.easeInOut(duration: 0.25), value: viewModel.recipientCalendarKeys)
@@ -84,6 +86,8 @@ struct CalendarFlowView: View {
                         .foregroundStyle(Self.fanOutColor)
                 }
                 .font(.caption.weight(.semibold))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(viewModel.contributorCalendarKeys.count) calendars gathered in, \(viewModel.recipientCalendarKeys.count) receiving busy blocks")
                 Divider()
                 busyBlockOptions
             }
@@ -149,8 +153,12 @@ struct CalendarFlowView: View {
             Image(systemName: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
         .help(detail)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityHint(detail)
         .padding(.bottom, 4)
         .background(GeometryReader { proxy in
             Color.clear.preference(key: HeaderHeightKey.self, value: proxy.size.height)
@@ -192,7 +200,7 @@ struct CalendarFlowView: View {
             .toggleStyle(.checkbox)
             Spacer(minLength: 4)
             if let recipientKey {
-                Picker("Availability", selection: Binding(
+                Picker("Availability for \(calendar.displayName)", selection: Binding(
                     get: { viewModel.recipientAvailability(for: recipientKey) },
                     set: { viewModel.setRecipientAvailability($0, for: recipientKey) }
                 )) {
