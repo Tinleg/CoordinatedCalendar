@@ -34,9 +34,6 @@ The update check links to the release page. A self-updater (Sparkle) would insta
 
 ## Sync behavior
 
-### Faster reaction to changes
-Syncing runs on a timer (5 minutes by default). Observing `EKEventStoreChanged` while the app or a small agent runs could trigger a sync shortly after a change, with the timer as a fallback. Needs care to debounce bursts of changes and to coexist with the background job.
-
 ### Busy blocks for tentative meetings
 Tentative events already fan out, with availability preserved where the recipient supports it. Some users may want an option to skip tentative events entirely, like Free ones.
 

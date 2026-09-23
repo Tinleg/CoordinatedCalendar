@@ -50,7 +50,8 @@ enum CommandLineBridge {
             let granted = try await ensureCalendarAccess(engine: engine)
             guard granted else {
                 fputs("Calendar full access is required. Open the app once and grant access, then retry.\n", stderr)
-                return 2
+                // The watcher exits cleanly so launchd leaves it stopped instead of restarting it to fail again.
+                return options.command == "watch" ? 0 : 2
             }
 
             switch options.command {
@@ -58,6 +59,8 @@ enum CommandLineBridge {
                 return listCalendars(engine: engine)
             case "list-events":
                 return listEvents(options: options, engine: engine)
+            case "watch":
+                return await ChangeWatcher.run()
             case "copy":
                 return await copy(options: options, engine: engine)
             case "delete":
@@ -269,6 +272,21 @@ enum CommandLineBridge {
             let dryRun = !options.hasFlag("execute")
             var aggregate = SyncResult()
 
+            // Most runs find nothing to do. Reading each calendar once and comparing it with how things looked
+            // when the last full sync started is far cheaper than running every route to find that out.
+            // Previews always run in full, and --force skips the check.
+            let signature = syncSignature(saved: saved, consolidatedKey: consolidatedKey, startDate: startDate,
+                                          endDate: endDate, options: options, engine: engine)
+            if !dryRun, !options.hasFlag("force"),
+               SyncSignatureRecord.canSkip(current: signature.value, recorded: SyncStatusStore.loadSignature()) {
+                var unchanged = SyncResult()
+                unchanged.scanned = signature.eventCount
+                unchanged.skipped = signature.eventCount
+                print("gui settings unchanged since the last full sync: scanned=\(signature.eventCount); nothing to do")
+                SyncStatusStore.save(SyncRunStatus(finishedAt: Date(), result: unchanged))
+                return 0
+            }
+
             for sourceKey in saved.contributorCalendarKeys.sorted() where sourceKey != consolidatedKey {
                 var settings = saved.fanInSettings(
                     sourceKey: sourceKey,
@@ -311,12 +329,50 @@ enum CommandLineBridge {
             printSummary(label: dryRun ? "gui settings preview total" : "gui settings execute total", result: aggregate, detail: false)
             if !dryRun {
                 SyncStatusStore.save(SyncRunStatus(finishedAt: Date(), result: aggregate))
+                // The signature from before this run: the run's own writes change the calendars, so the next
+                // run is a full one that confirms them, and anything changed while this ran is not missed.
+                // A failed run records nothing, so the next run retries in full and reports it again.
+                SyncStatusStore.saveSignature(aggregate.failed == 0
+                    ? SyncSignatureRecord(signature: signature.value, fullRunAt: Date()) : nil)
             }
             return aggregate.failed == 0 ? 0 : 1
         } catch {
             fputs("\(error.localizedDescription)\n", stderr)
             return 64
         }
+    }
+
+    /// The signature of every calendar a consolidated sync touches, and how many events that covered.
+    private static func syncSignature(
+        saved: GUISettings,
+        consolidatedKey: String,
+        startDate: Date,
+        endDate: Date,
+        options: CLIOptions,
+        engine: CoordinatedCalendarEngine
+    ) -> (value: String, eventCount: Int) {
+        let keys = Set([consolidatedKey] + saved.contributorCalendarKeys + saved.recipientCalendarKeys).sorted()
+        var events: [(calendarKey: String, event: any StoredEvent)] = []
+        var missing: [String] = []
+        for key in keys {
+            // A calendar that is absent, or comes back, changes the signature too.
+            guard let calendar = engine.calendar(for: key) else {
+                missing.append(key)
+                continue
+            }
+            events += engine.events(from: startDate, to: endDate, calendars: [calendar]).map { (key, $0) }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let settings = (try? encoder.encode(saved)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let context = [
+            "version:\(UpdateChecker.currentVersion)",
+            "window:\(startDate.timeIntervalSince1970)-\(endDate.timeIntervalSince1970)",
+            "reconcile:\(!options.hasFlag("no-reconcile-deletions"))",
+            "settings:\(settings)",
+            "missing:\(missing.joined(separator: ","))"
+        ]
+        return (SyncSignature.of(events: events, context: context), events.count)
     }
 
     private static func baseSettings(options: CLIOptions, source: CalendarIdentity, destination: CalendarIdentity) throws -> BridgeSettings {
@@ -659,6 +715,7 @@ private struct CLIOptions {
         "install-sync-agent",
         "list-calendars",
         "list-events",
+        "watch",
         "diagnostics",
         "check-for-updates",
         "remove-all-copies",
@@ -709,8 +766,11 @@ Commands:
   --fan-in --to CONSOLIDATED [--from CAL ...] [--execute]
   --fan-out --from CONSOLIDATED [--to CAL ...] [--execute]
   --cycle --consolidated CAL [--execute]
-  --sync-gui-settings [--execute] [--gui-settings PATH]
-  --install-sync-agent [--interval SECONDS]  Replace all CoordinatedCalendar LaunchAgents with one sync job and a health check
+  --sync-gui-settings [--execute] [--force] [--gui-settings PATH]
+                             With --execute, stops early when no calendar has changed since the last full
+                             sync (a full sync runs at least every 6 hours anyway); --force always syncs.
+  --watch                    Stay running and start the sync job shortly after the calendars change.
+  --install-sync-agent [--interval SECONDS]  Replace all CoordinatedCalendar LaunchAgents with the sync job, the change watcher and a health check
   --health-check [--notify] [--max-age-minutes N]
   --remove-all-copies [--execute]  Uninstall: remove the background jobs and every event this app created
   --install-agent --consolidated CAL [--interval 300]

@@ -303,9 +303,10 @@ Install the scheduled sync from the installed app. This works either from the GU
 ~/Applications/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar --install-sync-agent
 ```
 
-This replaces every existing `io.github.tinleg.coordinatedcalendar.*` LaunchAgent with two agents:
+This replaces every existing `io.github.tinleg.coordinatedcalendar.*` LaunchAgent with three agents:
 
-- `io.github.tinleg.coordinatedcalendar.sync` runs `--sync-gui-settings --execute` at the shortest interval saved in the GUI (default 300 seconds), over a rolling window derived from the GUI's saved dates. All fan-ins run first, then all fan-outs, inside one process, so runs never overlap.
+- `io.github.tinleg.coordinatedcalendar.watch` runs `--watch` and stays running. macOS tells it whenever the calendars change, including when an account brings down a change made on another device, and it starts the sync about 15 seconds after the changes stop arriving (never more than a minute after the first). It does no syncing itself and uses about 20 MB of memory and next to no CPU.
+- `io.github.tinleg.coordinatedcalendar.sync` runs `--sync-gui-settings --execute` when the watcher starts it, and on a timer as a safety net: the interval saved in the GUI (default 300 seconds), over the rolling window saved there. All fan-ins run first, then all fan-outs, inside one process, so runs never overlap. A run first compares the calendars with how they looked when the last full sync started, and stops there when nothing has changed: under a second, where a full sync takes a few. A full sync still runs at least every 6 hours, after any settings change, when the window moves on at midnight and after an update; `--force` always runs one.
 - `io.github.tinleg.coordinatedcalendar.health` runs `--health-check --notify` every 15 minutes. It posts a macOS notification when the last sync is older than four intervals or had failures, repeats every 6 hours while the problem persists, and posts once when the sync recovers.
 
 Installing refuses to run from a temporary location such as `/private/tmp`, which macOS clears on restart.
@@ -316,12 +317,15 @@ Check health by hand:
 ~/Applications/CoordinatedCalendar.app/Contents/MacOS/CoordinatedCalendar --health-check
 ```
 
-Each scheduled run records its outcome in `~/Library/Application Support/CoordinatedCalendar/last-sync.json`. Logs are written to:
+Each scheduled run records its outcome in `~/Library/Application Support/CoordinatedCalendar/last-sync.json`, and a successful full sync records what the calendars looked like in `sync-signature.json`. Logs are written to:
 
 ```text
 ~/Library/Logs/io.github.tinleg.coordinatedcalendar.sync.log
 ~/Library/Logs/io.github.tinleg.coordinatedcalendar.sync.err.log
+~/Library/Logs/io.github.tinleg.coordinatedcalendar.watch.log   (one line each time a change starts a sync)
 ```
+
+How quickly a change made elsewhere shows up still depends on the account: the watcher reacts when the change reaches this Mac, which is when Calendar syncs that account.
 
 Errors always go to the `.err.log`. Add `--verbose` to any sync command to also list each create, update, delete and blocked action.
 

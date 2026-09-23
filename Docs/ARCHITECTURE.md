@@ -27,6 +27,7 @@ The Swift package has two targets and one test target:
 | `FreeBusyCompliance.swift` | What a busy block may carry, and how to strip one back to that. |
 | `MappingLedger.swift` | A per-Mac cache mapping source occurrences to copies (`mappings.json`). |
 | `SyncHealth.swift` | The last-run status record and the rules for when the health check alerts. |
+| `SyncSignature.swift` | The digest that lets a run stop when nothing has changed, and the change debouncer. |
 | `SyncResult.swift` | Counts and per-event previews returned by every run. |
 | `AppSupport.swift` | The `~/Library/Application Support/CoordinatedCalendar` folder. |
 | `BridgeError.swift` | User-facing errors. |
@@ -41,7 +42,8 @@ The Swift package has two targets and one test target:
 | `ContentView.swift` | Sidebar pages: Status, Calendars, Schedule, Preview & Run and Manual Copy. |
 | `CalendarFlowView.swift` | The Calendars page: contributors, the consolidated card and recipients, joined by curves. |
 | `GUISettingsStore.swift` | `gui-settings.json`, and the shared fan-in and fan-out settings builder used by both the GUI and `--sync-gui-settings`. |
-| `SyncAgentInstaller.swift` | Installing and removing LaunchAgents, reading job details from launchd, and the last-sync status and notification store. |
+| `SyncAgentInstaller.swift` | Installing and removing LaunchAgents, reading job details from launchd, and the last-sync status, signature and notification store. |
+| `ChangeWatcher.swift` | `--watch`: starts the sync job shortly after the calendars change. |
 
 ## Data model
 
@@ -99,9 +101,10 @@ A consolidated sync runs every contributor to the consolidated calendar (fan-in)
 
 ## Background jobs and health
 
-`SyncAgentInstaller` installs two LaunchAgents under the label prefix `io.github.tinleg.coordinatedcalendar.`:
+`SyncAgentInstaller` installs three LaunchAgents under the label prefix `io.github.tinleg.coordinatedcalendar.`:
 
-- **`.sync`** runs `--sync-gui-settings --execute` over a rolling window, at the interval chosen on the Schedule page, and at login.
+- **`.watch`** runs `--watch` (`ChangeWatcher`) and is kept alive by launchd, except after a clean exit, which it makes when Calendar access is missing. It observes `EKEventStoreChanged`, waits for a quiet spell (`ChangeDebouncer`: 15 seconds, at most 60 after the first change), waits for a running sync to finish, and then `launchctl kickstart`s the sync job. It never syncs itself, so every run goes through the one sync job.
+- **`.sync`** runs `--sync-gui-settings --execute` over a rolling window, when the watcher starts it, at the interval chosen on the Schedule page, and at login. It first computes a `SyncSignature` of every event in every calendar it touches plus the settings, window and app version, and stops when that matches the signature recorded when the last successful full sync started (`sync-signature.json`) and that sync is under six hours old. The recorded signature is the one from before the run, so a run's own writes lead to one confirming full run; a failed run records nothing.
 - **`.health`** runs `--health-check --notify` every 15 minutes and does not run at load. It alerts when the last sync is older than four intervals or had failures. It repeats every six hours while a problem persists, and posts once on recovery.
 
 A real consolidated sync records its outcome in `last-sync.json`. The Status page shows health, the last sync and each job's schedule, command, launchd state, run count, last exit code and logs. Installing refuses to run from a temporary folder.
@@ -136,7 +139,8 @@ Run the app bundle's executable with a command, for example `~/Applications/Coor
 | `--copy`, `--delete` | One route between two calendars, and deleting its copies. |
 | `--fan-in`, `--fan-out`, `--cycle` | Consolidated routes built from command-line options. |
 | `--sync-gui-settings` | The consolidated sync from the GUI's saved settings, which is what the background job runs. |
-| `--install-sync-agent` | Replace all of the app's LaunchAgents with the sync and health jobs. |
+| `--install-sync-agent` | Replace all of the app's LaunchAgents with the sync, change-watcher and health jobs. |
+| `--watch` | Stay running and start the sync job shortly after the calendars change (the `.watch` job). |
 | `--health-check [--notify]` | Check the last sync, optionally notifying. |
 | `--remove-all-copies` | Uninstall: remove the jobs and every copy. |
 | `--install-agent`, `--uninstall-agent` | The older single `--cycle` agent. |

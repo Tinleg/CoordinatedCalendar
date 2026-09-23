@@ -1,11 +1,13 @@
 import CoordinatedCalendarCore
 import Foundation
 
-/// Installs the scheduled sync as one LaunchAgent running `--sync-gui-settings`, plus an hourly-or-faster
-/// health check. Fan-in and fan-out run sequentially inside that one job, so runs never overlap.
+/// Installs the scheduled sync as one LaunchAgent running `--sync-gui-settings`, a watcher that starts it
+/// when the calendars change, and a health check. Fan-in and fan-out run sequentially inside the one sync
+/// job, and the watcher only ever starts that job, so runs never overlap.
 enum SyncAgentInstaller {
     static let syncLabel = "io.github.tinleg.coordinatedcalendar.sync"
     static let healthLabel = "io.github.tinleg.coordinatedcalendar.health"
+    static let watchLabel = "io.github.tinleg.coordinatedcalendar.watch"
     static let healthInterval = 900
 
     private static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
@@ -49,7 +51,16 @@ enum SyncAgentInstaller {
             runAtLoad: false,
             arguments: [executable, "--health-check", "--notify", "--max-age-minutes", "\(max(interval, 60) * 4 / 60)"]
         )
-        return [syncURL, healthURL]
+        // Always running; restarted if it crashes, but not after exiting cleanly (it does when Calendar
+        // access is missing, rather than failing again every few seconds).
+        let watchURL = try writeAndLoad(
+            label: watchLabel,
+            interval: nil,
+            runAtLoad: true,
+            arguments: [executable, "--watch"],
+            extra: ["KeepAlive": ["SuccessfulExit": false], "ProcessType": "Background", "ThrottleInterval": 30]
+        )
+        return [syncURL, healthURL, watchURL]
     }
 
     static let labelPrefix = "io.github.tinleg.coordinatedcalendar."
@@ -70,7 +81,6 @@ enum SyncAgentInstaller {
         return removed
     }
 
-    /// Converts the saved GUI date range into a rolling window relative to today.
     /// The window the installed sync job runs with, read from its plist; nil when there is none.
     static func installedSyncWindow() -> SyncWindow? {
         let url = launchAgentsURL.appendingPathComponent("\(syncLabel).plist")
@@ -150,19 +160,38 @@ enum SyncAgentInstaller {
         return values
     }
 
+    static func isRunning(label: String) -> Bool {
+        launchdState(label: label)["state"] == "running"
+    }
+
+    /// Starts a loaded job now. A job that is already running is left alone.
+    static func startNow(label: String) throws {
+        try runLaunchctl(["kickstart", "\(service)/\(label)"])
+    }
+
+    /// True when the jobs predate the change watcher and should be submitted again to add it.
+    static var isMissingWatcher: Bool {
+        isInstalled && !FileManager.default.fileExists(atPath: launchAgentsURL.appendingPathComponent("\(watchLabel).plist").path)
+    }
+
     static var isInstalled: Bool {
         FileManager.default.fileExists(atPath: launchAgentsURL.appendingPathComponent("\(syncLabel).plist").path)
     }
 
     private static var service: String { "gui/\(getuid())" }
 
-    private static func writeAndLoad(label: String, interval: Int, runAtLoad: Bool, arguments: [String]) throws -> URL {
+    private static func writeAndLoad(
+        label: String,
+        interval: Int?,
+        runAtLoad: Bool,
+        arguments: [String],
+        extra: [String: Any] = [:]
+    ) throws -> URL {
         try FileManager.default.createDirectory(at: launchAgentsURL, withIntermediateDirectories: true)
         let plistURL = launchAgentsURL.appendingPathComponent("\(label).plist")
-        let plist: [String: Any] = [
+        var plist: [String: Any] = [
             "Label": label,
             "ProgramArguments": arguments,
-            "StartInterval": interval,
             "RunAtLoad": runAtLoad,
             "StandardOutPath": home.appendingPathComponent("Library/Logs/\(label).log").path,
             "StandardErrorPath": home.appendingPathComponent("Library/Logs/\(label).err.log").path,
@@ -170,6 +199,10 @@ enum SyncAgentInstaller {
             // in System Settings > General > Login Items, instead of an unattributed item that looks suspect.
             "AssociatedBundleIdentifiers": [Bundle.main.bundleIdentifier ?? "io.github.tinleg.coordinatedcalendar"]
         ]
+        if let interval {
+            plist["StartInterval"] = interval
+        }
+        plist.merge(extra) { _, new in new }
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: plistURL, options: [.atomic])
         _ = try? runLaunchctl(["bootout", service, plistURL.path])
@@ -212,6 +245,26 @@ enum SyncStatusStore {
                 .appendingPathComponent("Library/Application Support/\(AppSupport.folderName)", isDirectory: true)
     }
     static var statusURL: URL { directory.appendingPathComponent("last-sync.json") }
+    private static var signatureURL: URL { directory.appendingPathComponent("sync-signature.json") }
+
+    /// What the calendars looked like when the last successful full sync started (see SyncSignature).
+    static func loadSignature() -> SyncSignatureRecord? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return (try? Data(contentsOf: signatureURL)).flatMap { try? decoder.decode(SyncSignatureRecord.self, from: $0) }
+    }
+
+    /// Records a successful full sync, or with nil forgets it, so the next run is a full one.
+    static func saveSignature(_ record: SyncSignatureRecord?) {
+        guard let record else {
+            try? FileManager.default.removeItem(at: signatureURL)
+            return
+        }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try? encoder.encode(record).write(to: signatureURL, options: [.atomic])
+    }
     private static var alertURL: URL { directory.appendingPathComponent("health-alert.json") }
 
     private struct AlertState: Codable {

@@ -60,6 +60,16 @@ The choices that shape CoordinatedCalendar, why they were made, and what would b
 
 **A moved event is followed, not replaced.** A copy's identity includes its source's start, because that is what tells a recurring series' occurrences apart. On its own that made a moved meeting look deleted and new. A non-recurring event keeps its identifier when it moves, so the ledger mapping for it is moved to the new start and the copy is updated in place. It needs the ledger: a Mac that never saw the copy replaces it.
 
+## Sync when the calendars change, and skip runs that would find nothing
+
+**Decision:** a small always-running job watches for EventKit's change notification and starts the sync job about 15 seconds after changes stop arriving. The timer stays as a safety net, and every run first compares a signature of all the calendars it touches with the one recorded when the last full sync started, stopping when they match.
+
+**Why:** on a timer, a change waited up to five minutes, and nearly every run re-read about 2,600 events across eight routes to find nothing to do (2026-09-23: 4.7 seconds each, 288 times a day). Now a change is synced seconds after it reaches the Mac, and a quiet run takes under a second.
+
+**How it stays correct:** the watcher never syncs itself; it starts the one sync job, so runs cannot overlap, and it waits for a running sync to finish so a change read too late for that run gets another. The recorded signature is the one from *before* a run, so the run's own writes, and anything that changed while it ran, lead to one more full run. A failed run records nothing. The signature covers every field a sync acts on, plus the settings, window and app version, and a full sync runs at least every six hours regardless.
+
+**Cost:** one more background process, holding Calendar access while it waits, and each real change costs two full runs instead of one.
+
 ## A copy never alerts
 
 **Decision:** copies are written with no alerts — busy blocks always, consolidated copies unless the person turns alerts back on — and alerts found on a copy are removed on the next run.

@@ -541,7 +541,7 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: 260)
-                Text("Each run does every fan-in, then every fan-out. After changing the interval or the date window, click Submit Background Jobs on the Status page to apply them. Calendar choices, the busy block title and skip settings apply on the next run without resubmitting.")
+                Text("A change to your calendars starts a sync within about 15 seconds of the account delivering it. This interval is the safety net in between; when nothing has changed, a run stops after a quick check. Each sync does every fan-in, then every fan-out. After changing the interval or the date window, click Submit Background Jobs on the Status page to apply them. Calendar choices, the busy block title and skip settings apply on the next run without resubmitting.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -600,8 +600,13 @@ struct ContentView: View {
     private var backgroundJobsSection: some View {
         GroupBox("Background Jobs") {
             VStack(alignment: .leading, spacing: 12) {
+                if !viewModel.isDemo, SyncAgentInstaller.isMissingWatcher, !viewModel.backgroundJobs.isEmpty {
+                    Label("These jobs are from an earlier version, which synced only on a timer. Click Submit Background Jobs above to add the change watcher, which syncs within seconds of a change.", systemImage: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if viewModel.backgroundJobs.isEmpty {
-                    Text("No background jobs are installed. Submit Background Jobs above to install the sync and health-check jobs.")
+                    Text("No background jobs are installed. Submit Background Jobs above to install the sync job, the change watcher and the health check.")
                         .foregroundStyle(.secondary)
                 }
                 ForEach(viewModel.backgroundJobs) { job in
@@ -620,7 +625,9 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
-                        jobDetailRow("Schedule", "Every \(intervalLabel(job.interval))\(job.runsAtLoad ? ", and at login" : "")")
+                        jobDetailRow("Schedule", job.interval == 0
+                            ? "Always running; starts a sync shortly after your calendars change"
+                            : "Every \(intervalLabel(job.interval))\(job.runsAtLoad ? ", and at login" : "")")
                         jobDetailRow("State", jobStateText(job))
                         jobDetailRow("Command", job.arguments.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " "))
                         jobDetailRow("Log", job.logPath)
@@ -645,11 +652,15 @@ struct ContentView: View {
     private func jobTitle(_ job: SyncAgentInstaller.JobDetails) -> String {
         if job.label.hasSuffix(".sync") { return "Sync" }
         if job.label.hasSuffix(".health") { return "Health check" }
+        if job.label.hasSuffix(".watch") { return "Change watcher" }
         return job.label.components(separatedBy: ".").last?.capitalized ?? job.label
     }
 
     private func jobStateText(_ job: SyncAgentInstaller.JobDetails) -> String {
         guard let state = job.state else { return "Installed but not loaded. Submit Background Jobs to load it." }
+        if job.interval == 0 {
+            return state == "running" ? "Watching for changes" : "Not running. Submit Background Jobs to start it."
+        }
         var parts = [state == "running" ? "Running now" : "Loaded, waiting for the next run"]
         if let runs = job.runs { parts.append("\(runs) runs since loaded") }
         if let code = job.lastExitCode { parts.append(code == "0" ? "last run succeeded" : "last exit code \(code)") }

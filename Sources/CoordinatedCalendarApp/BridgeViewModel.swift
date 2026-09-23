@@ -325,7 +325,7 @@ final class BridgeViewModel: ObservableObject {
                 windowArguments: syncWindow.arguments
             )
             refreshSyncStatus()
-            statusText = "Submitted the CoordinatedCalendar sync job and health check."
+            statusText = "Submitted the CoordinatedCalendar sync job, change watcher and health check."
         } catch {
             result = failureResult(error.localizedDescription)
         }
@@ -663,6 +663,7 @@ final class BridgeViewModel: ObservableObject {
         let logs = "~/Library/Logs/io.github.tinleg.coordinatedcalendar"
         backgroundJobs = [
             SyncAgentInstaller.JobDetails(label: "io.github.tinleg.coordinatedcalendar.sync", plistPath: "~/Library/LaunchAgents/io.github.tinleg.coordinatedcalendar.sync.plist", interval: 300, runsAtLoad: true, arguments: [executable, "--sync-gui-settings", "--execute", "--window-days-past", "730", "--window-days-future", "1490"], logPath: logs + ".sync.log", errorLogPath: logs + ".sync.err.log", state: "not running", runs: "42", lastExitCode: "0"),
+            SyncAgentInstaller.JobDetails(label: "io.github.tinleg.coordinatedcalendar.watch", plistPath: "~/Library/LaunchAgents/io.github.tinleg.coordinatedcalendar.watch.plist", interval: 0, runsAtLoad: true, arguments: [executable, "--watch"], logPath: logs + ".watch.log", errorLogPath: logs + ".watch.err.log", state: "running", runs: "1", lastExitCode: nil),
             SyncAgentInstaller.JobDetails(label: "io.github.tinleg.coordinatedcalendar.health", plistPath: "~/Library/LaunchAgents/io.github.tinleg.coordinatedcalendar.health.plist", interval: 900, runsAtLoad: false, arguments: [executable, "--health-check", "--notify", "--max-age-minutes", "20"], logPath: logs + ".health.log", errorLogPath: logs + ".health.err.log", state: "not running", runs: "14", lastExitCode: "0")
         ]
         mode = .consolidatedSync
