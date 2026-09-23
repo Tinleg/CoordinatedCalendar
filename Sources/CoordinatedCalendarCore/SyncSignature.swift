@@ -11,29 +11,35 @@ import Foundation
 /// moving on at midnight or an upgrade all make the next run a full one.
 public enum SyncSignature {
     public static func of(events: [(calendarKey: String, event: any StoredEvent)], context: [String]) -> String {
-        let lines = events.map { item in
-            let event = item.event
-            return [
-                item.calendarKey,
-                event.eventIdentifier ?? event.calendarItemIdentifier,
-                event.calendarItemExternalIdentifier ?? "",
-                seconds(event.startDate),
-                seconds(event.endDate),
-                event.isAllDay ? "allDay" : "timed",
-                event.title ?? "",
-                event.location ?? "",
-                event.url?.absoluteString ?? "",
-                event.notes ?? "",
-                "\(event.availability.rawValue)",
-                "\(event.status.rawValue)",
-                "\((event.alarms ?? []).count)",
-                event.hasRecurrenceRules ? "recurring" : "single",
-                EventDetailsSummary.declinedByCurrentUser(event) ? "declined" : "",
-                event.structuredLocation?.geoLocation.map { "\($0.coordinate.latitude),\($0.coordinate.longitude)" } ?? "",
-                seconds(event.lastModifiedDate)
-            ].joined(separator: "\u{1f}")
-        }
+        let lines = events.map { line(calendarKey: $0.calendarKey, event: $0.event) }
         return EventFingerprint.hash(parts: context + ["events:\(lines.count)"] + lines.sorted())
+    }
+
+    /// One event's fields, appended one at a time: a single array literal of these took older compilers
+    /// longer to type-check than they allow.
+    private static func line(calendarKey: String, event: any StoredEvent) -> String {
+        var parts: [String] = [calendarKey]
+        parts.append(event.eventIdentifier ?? event.calendarItemIdentifier)
+        parts.append(event.calendarItemExternalIdentifier ?? "")
+        parts.append(seconds(event.startDate))
+        parts.append(seconds(event.endDate))
+        parts.append(event.isAllDay ? "allDay" : "timed")
+        parts.append(event.title ?? "")
+        parts.append(event.location ?? "")
+        parts.append(event.url?.absoluteString ?? "")
+        parts.append(event.notes ?? "")
+        parts.append(String(event.availability.rawValue))
+        parts.append(String(event.status.rawValue))
+        parts.append(String((event.alarms ?? []).count))
+        parts.append(event.hasRecurrenceRules ? "recurring" : "single")
+        parts.append(EventDetailsSummary.declinedByCurrentUser(event) ? "declined" : "")
+        if let coordinate = event.structuredLocation?.geoLocation?.coordinate {
+            parts.append("\(coordinate.latitude),\(coordinate.longitude)")
+        } else {
+            parts.append("")
+        }
+        parts.append(seconds(event.lastModifiedDate))
+        return parts.joined(separator: "\u{1f}")
     }
 
     private static func seconds(_ date: Date?) -> String {
