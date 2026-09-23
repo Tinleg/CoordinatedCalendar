@@ -68,10 +68,8 @@ for _ in $(seq 1 40); do
   [[ "$(osascript -e "tell application \"Finder\" to exists file \".background:background.tiff\" of disk \"$VOLUME\"" 2>/dev/null)" == true ]] && break
   sleep 0.5
 done
-STYLED=yes
-if [[ "${COORDINATEDCALENDAR_SKIP_LAYOUT:-}" == 1 ]]; then
-  STYLED="skipped"
-elif ! LAYOUT_ERROR="$(osascript 2>&1 >/dev/null <<APPLESCRIPT
+lay_out_window() {
+  osascript 2>&1 >/dev/null <<APPLESCRIPT
 tell application "Finder"
   tell disk "$VOLUME"
     open
@@ -104,9 +102,23 @@ tell application "Finder"
   end tell
 end tell
 APPLESCRIPT
-)"; then
+}
+
+# Finder refuses this now and then, in a different way each time (-10006, -1700), and succeeds on a later
+# try; a single attempt stopped two releases in a row. So it gets several.
+STYLED=yes
+if [[ "${COORDINATEDCALENDAR_SKIP_LAYOUT:-}" == 1 ]]; then
+  STYLED="skipped"
+else
   STYLED=no
-  echo "Finder could not lay out the window: $LAYOUT_ERROR" >&2
+  for attempt in 1 2 3 4 5; do
+    if LAYOUT_ERROR="$(lay_out_window)"; then
+      STYLED=yes
+      break
+    fi
+    echo "Finder could not lay out the window (attempt $attempt of 5): $LAYOUT_ERROR" >&2
+    sleep 3
+  done
 fi
 if [[ "$STYLED" == no ]]; then
   # A plain window has no drag-to-Applications arrow and no first-launch instructions, so this is not
