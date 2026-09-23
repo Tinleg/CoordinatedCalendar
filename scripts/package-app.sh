@@ -53,8 +53,12 @@ if command -v codesign >/dev/null 2>&1; then
   codesign "${SIGN_FLAGS[@]}" --sign "$IDENTITY" "$STAGE_DIR" >/dev/null
 fi
 
-# Wait for a running scheduled sync (the GUI runs without arguments and is not waited on).
-while pgrep -f "$APP_DIR/Contents/MacOS/CoordinatedCalendar --" >/dev/null 2>&1; do
+# Wait for a running scheduled sync. The GUI runs without arguments and is not waited on, nor is the change
+# watcher (--watch), which never exits: it notices the replaced app and restarts itself on the new one.
+running_commands() {
+  pgrep -fl "$APP_DIR/Contents/MacOS/CoordinatedCalendar --" 2>/dev/null | grep -v -- "--watch" || true
+}
+while [[ -n "$(running_commands)" ]]; do
   echo "Waiting for the running CoordinatedCalendar sync to finish..."
   sleep 5
 done

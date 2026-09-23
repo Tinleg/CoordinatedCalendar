@@ -33,9 +33,13 @@ enum ChangeWatcher {
             }
         }
         log("watching for calendar changes")
+        let startedAs = executableIdentity()
 
         while true {
             try? await Task.sleep(for: .seconds(2))
+            if let exitCode = await exitCodeIfReplaced(startedAs: startedAs) {
+                return exitCode
+            }
             guard pending.debouncer.isDue(at: Date()) else { continue }
             let count = pending.debouncer.pendingChanges
             pending.debouncer.reset()
@@ -53,6 +57,37 @@ enum ChangeWatcher {
                 log("calendars changed, but the sync job could not be started: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// A watcher outlives the app it came from: replacing the app, from a disk image or a build script,
+    /// would leave the old code watching until the next login. So it checks its own executable and, when
+    /// that has been replaced, exits with a failure code, which launchd answers by starting the new one.
+    /// When the app is gone for good it exits cleanly, and launchd leaves it stopped.
+    private static func exitCodeIfReplaced(startedAs: String?) async -> Int32? {
+        let now = executableIdentity()
+        guard now != startedAs else { return nil }
+        // A replacement removes the old app before the new one is in place; give it time to arrive.
+        var current = now
+        for _ in 0..<15 where current == nil {
+            try? await Task.sleep(for: .seconds(2))
+            current = executableIdentity()
+        }
+        if current == nil {
+            log("the app was removed; stopping")
+            return 0
+        }
+        log("the app was updated; restarting on the new version")
+        return 75
+    }
+
+    /// The executable's file number and modification time, or nil when it is missing.
+    private static func executableIdentity() -> String? {
+        guard let path = Bundle.main.executablePath,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        else { return nil }
+        let number = attributes[.systemFileNumber].map { "\($0)" } ?? ""
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(number)-\(modified)"
     }
 
     private static func log(_ message: String) {

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- **Changes sync within seconds instead of up to five minutes.** A new background job watches for changes to your calendars, including ones an account brings down from another device, and starts a sync about 15 seconds after they stop arriving. It uses about 20 MB of memory and next to no CPU. The timed sync stays as a safety net. Existing installs gain it when you click **Submit Background Jobs** once; the Status page says so.
+- **Changes sync within seconds instead of up to five minutes.** A new background job watches for changes to your calendars, including ones an account brings down from another device, and starts a sync about 15 seconds after they stop arriving. It uses about 20 MB of memory and next to no CPU, and restarts itself on the new version when you update the app. The timed sync stays as a safety net. Existing installs gain it when you click **Submit Background Jobs** once; the Status page says so.
 - **Quiet runs are nearly free.** A sync first checks whether anything it would read has changed since the last full sync, and stops if not: under a second instead of about five. A full sync still runs at least every 6 hours, after a settings change, when the date window moves on and after an update. `--sync-gui-settings --force` always runs in full.
 
 ## 0.4.1
