@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **Skip all-day events on fan-out** (Calendars page, off by default; `--fan-out --skip-all-day`). All-day events marked Busy used to put an all-day busy block in every other calendar, so a family trip or a holiday blocked whole days in your work calendars. With this on, they get no busy block, and blocks already made for them are removed on the next sync. They are still gathered into the consolidated calendar.
+- `--list-events` also shows each event's end, whether it is all-day, and its free/busy status.
+- Building and releasing work again when the keychain holds two certificates with the same name, which joining the paid Apple Developer Program can cause: signing now picks a certificate by its fingerprint, the one that expires last.
+
 ## 0.5.0
 
 - **Changes sync within seconds instead of up to five minutes.** A new background job watches for changes to your calendars, including ones an account brings down from another device, and starts a sync about 15 seconds after they stop arriving. It uses about 20 MB of memory and next to no CPU, and restarts itself on the new version when you update the app. The timed sync stays as a safety net. Existing installs gain it when you click **Submit Background Jobs** once; the Status page says so.

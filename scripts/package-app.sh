@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/signing-identity.sh"
 BUILD_ROOT="${COORDINATEDCALENDAR_SCRATCH:-$ROOT_DIR/.build}"
 DEFAULT_APP_DIR="$HOME/Applications/CoordinatedCalendar.app"
 APP_DIR="${COORDINATEDCALENDAR_APP_DIR:-$DEFAULT_APP_DIR}"
@@ -50,7 +51,10 @@ if command -v codesign >/dev/null 2>&1; then
   if [[ "$IDENTITY" == "Developer ID Application"* ]]; then
     SIGN_FLAGS+=(--timestamp)
   fi
-  codesign "${SIGN_FLAGS[@]}" --sign "$IDENTITY" "$STAGE_DIR" >/dev/null
+  # By fingerprint: a name can belong to more than one certificate (see signing-identity.sh).
+  SIGN_WITH="$IDENTITY"
+  [[ "$IDENTITY" == "-" ]] || SIGN_WITH="$(signing_identity "$IDENTITY")"
+  codesign "${SIGN_FLAGS[@]}" --sign "${SIGN_WITH:-$IDENTITY}" "$STAGE_DIR" >/dev/null
 fi
 
 # Wait for a running scheduled sync. The GUI runs without arguments and is not waited on, nor is the change

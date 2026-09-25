@@ -26,6 +26,7 @@ final class BridgeViewModel: ObservableObject {
     @Published var keepAlertsInConsolidated = false
     @Published var skipFreeEvents = true
     @Published var skipDeclinedEvents = true
+    @Published var skipAllDayEvents = false
     @Published var syncInterval = 300
     @Published var lastSync: SyncRunStatus?
     @Published var backgroundJobsInstalled = false
@@ -389,6 +390,11 @@ final class BridgeViewModel: ObservableObject {
         saveGUISettings()
     }
 
+    func setSkipAllDayEvents(_ skip: Bool) {
+        skipAllDayEvents = skip
+        saveGUISettings()
+    }
+
     func setSyncInterval(_ interval: Int) {
         syncInterval = interval
         saveGUISettings()
@@ -587,6 +593,7 @@ final class BridgeViewModel: ObservableObject {
             keepAlertsInConsolidated = stored.keepAlertsInConsolidated ?? false
             skipFreeEvents = stored.skipFreeEvents ?? true
             skipDeclinedEvents = stored.skipDeclinedEvents ?? true
+            skipAllDayEvents = stored.skipAllDayEvents ?? false
             syncInterval = stored.effectiveSyncInterval
             calendarNames = stored.calendarNames ?? [:]
             normalizeContributorAvailabilities()
@@ -634,6 +641,7 @@ final class BridgeViewModel: ObservableObject {
             fanOutTitle: fanOutTitle,
             skipFreeEvents: skipFreeEvents,
             skipDeclinedEvents: skipDeclinedEvents,
+            skipAllDayEvents: skipAllDayEvents,
             keepAlertsInConsolidated: keepAlertsInConsolidated,
             syncInterval: syncInterval,
             calendarNames: calendarNames,

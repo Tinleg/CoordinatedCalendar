@@ -20,6 +20,8 @@ struct GUISettings: Codable, Equatable {
     var skipFreeEvents: Bool?
     /// Fan-out leaves out meetings you declined; nil means true.
     var skipDeclinedEvents: Bool?
+    /// Fan-out leaves out all-day events even when they are marked Busy; nil means false.
+    var skipAllDayEvents: Bool?
     /// Gathered events keep their alerts in the consolidated calendar; nil means false (alerts stripped).
     var keepAlertsInConsolidated: Bool?
     /// How often the background sync runs, in seconds; nil falls back to the shortest per-calendar interval.
@@ -137,6 +139,7 @@ extension GUISettings {
             title: effectiveFanOutTitle,
             skipFreeEvents: skipFreeEvents ?? true,
             skipDeclinedEvents: skipDeclinedEvents ?? true,
+            skipAllDayEvents: skipAllDayEvents ?? false,
             startDate: startDate,
             endDate: endDate,
             dryRun: dryRun

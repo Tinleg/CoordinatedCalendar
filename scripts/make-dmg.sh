@@ -16,6 +16,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/signing-identity.sh"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ROOT_DIR/Packaging/Info.plist")"
 VOLUME="CoordinatedCalendar"
 DIST="$ROOT_DIR/dist"
@@ -146,9 +147,9 @@ IMAGE_IDENTITY="${DEVELOPER_ID:-${COORDINATEDCALENDAR_SIGN_IDENTITY:-$(security 
 SIGNED=no
 if [[ -n "$IMAGE_IDENTITY" ]]; then
   if [[ -n "$DEVELOPER_ID" ]]; then
-    codesign --sign "$IMAGE_IDENTITY" --timestamp "$OUTPUT"
+    codesign --sign "$(signing_identity "$IMAGE_IDENTITY")" --timestamp "$OUTPUT"
   else
-    codesign --sign "$IMAGE_IDENTITY" "$OUTPUT"
+    codesign --sign "$(signing_identity "$IMAGE_IDENTITY")" "$OUTPUT"
   fi
   codesign --verify --strict "$OUTPUT" || { echo "The image failed signature verification." >&2; exit 1; }
   SIGNED=yes

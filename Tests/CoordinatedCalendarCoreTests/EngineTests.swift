@@ -33,7 +33,7 @@ private final class Setup {
 
     /// One full sync, as the app runs it: every contributor into the hub, then the hub out to every recipient.
     @discardableResult
-    func sync(dryRun: Bool = false, keepAlerts: Bool = false) async -> SyncResult {
+    func sync(dryRun: Bool = false, keepAlerts: Bool = false, skipAllDay: Bool = false) async -> SyncResult {
         let start = day - 7 * 24 * hour
         let end = day + 30 * 24 * hour
         var total = SyncResult()
@@ -44,8 +44,8 @@ private final class Setup {
         }
         for destination in [home, work].sorted(by: { $0.key < $1.key }) {
             total.add(await engine.run(settings: .fanOut(consolidatedKey: hub.key, destinationKey: destination.key,
-                                                         availability: .busy, startDate: start, endDate: end,
-                                                         dryRun: dryRun)))
+                                                         availability: .busy, skipAllDayEvents: skipAllDay,
+                                                         startDate: start, endDate: end, dryRun: dryRun)))
         }
         return total
     }
@@ -405,4 +405,26 @@ private extension SyncResult {
     #expect(copy.alarms?.count == 1)
     // Busy blocks still never alert.
     #expect(setup.busyBlocks(in: setup.home).allSatisfy { ($0.alarms ?? []).isEmpty })
+}
+
+@Test func allDayEventsAreGatheredAndBlockTimeUnlessSkipped() async throws {
+    let setup = Setup()
+    setup.addUsualEvents()
+    // A trip marked Busy, spanning several days.
+    let trip = setup.store.addEvent(to: setup.work, title: "Buffalo trip", start: day + 24 * hour, minutes: 4 * 24 * 60)
+    setup.store.editEvent(trip) { $0.isAllDay = true }
+
+    await setup.sync()
+    let copy = try #require(setup.copies(in: setup.hub).first { $0.title == "Work / Calendar: Buffalo trip" })
+    #expect(copy.isAllDay)
+    #expect(copy.endDate == day + 5 * 24 * hour)
+    let block = try #require(setup.busyBlocks(in: setup.home).first { $0.isAllDay })
+    #expect(block.startDate == day + 24 * hour)
+
+    // With the option, the all-day block goes; the timed one stays, and the trip is still gathered.
+    let result = await setup.sync(skipAllDay: true)
+    #expect(result.errors.isEmpty)
+    #expect(setup.busyBlocks(in: setup.home).map(\.startDate) == [day + 2 * hour])
+    #expect(setup.copies(in: setup.hub).contains { $0.title == "Work / Calendar: Buffalo trip" })
+    #expect(await setup.sync(skipAllDay: true).changes == 0)
 }

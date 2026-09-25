@@ -1557,6 +1557,9 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
            (metadataAvailability(from: event) ?? supportedAvailability(event.availability)) == .free {
             return "marked Free"
         }
+        if settings.skipAllDaySourceEvents, event.isAllDay {
+            return "all-day event"
+        }
         return nil
     }
 

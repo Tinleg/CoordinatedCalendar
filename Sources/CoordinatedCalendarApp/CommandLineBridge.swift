@@ -126,7 +126,9 @@ enum CommandLineBridge {
                 let marker = BridgeEventMetadata.parse(from: event.notes)
                 print([
                     iso.string(from: event.startDate),
+                    "to \(iso.string(from: event.endDate))\(event.isAllDay ? " all-day" : "")",
                     event.title ?? "Untitled",
+                    "availability: \(event.availability.rawValue)",
                     "external: \(event.calendarItemExternalIdentifier ?? "none")",
                     "recurring: \(event.hasRecurrenceRules ? "yes" : "no")",
                     "alerts: \((event.alarms ?? []).count)",
@@ -205,6 +207,7 @@ enum CommandLineBridge {
                 settings.transform.includeOriginCalendarInFreeBusyTitle = false
                 settings.skipFreeSourceEvents = !options.hasFlag("include-free")
                 settings.skipDeclinedSourceEvents = !options.hasFlag("include-declined")
+                settings.skipAllDaySourceEvents = options.hasFlag("skip-all-day")
                 settings.skipWhenSourceOriginMatchesDestination = true
                 let result = await engine.run(settings: settings)
                 printSummary(label: "fan-out \(source.displayName) -> \(destination.displayName)", result: result)
@@ -791,6 +794,8 @@ Options:
   --busy-title TITLE         Busy block title. Default: Busy, or Busy - Other for fan-out.
   --include-free             Fan-out: also block time for events marked Free (skipped by default).
   --include-declined         Fan-out: also block time for meetings you declined (skipped by default).
+  --skip-all-day             Fan-out: no busy blocks for all-day events, even ones marked Busy.
+                             --sync-gui-settings follows the GUI's "Skip all-day events" instead.
   --availability VALUE       Destination event availability: preserve, free, busy, or tentative. Default: busy.
                              Also accepts leave-as-is.
   --source-title             Prefix full-detail copies as "Calendar: Title".

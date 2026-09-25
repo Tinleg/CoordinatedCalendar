@@ -737,7 +737,7 @@ struct ContentView: View {
                 summaryRow("Contributors", "\(viewModel.contributorCalendarKeys.count) calendars")
                 summaryRow("Recipients", "\(viewModel.recipientCalendarKeys.count) calendars")
                 summaryRow("Busy block title", viewModel.fanOutTitle.isEmpty ? FreeBusyCompliance.fanOutTitle : viewModel.fanOutTitle)
-                summaryRow("Skips", [viewModel.skipFreeEvents ? "Free events" : nil, viewModel.skipDeclinedEvents ? "declined meetings" : nil].compactMap { $0 }.joined(separator: ", ").nonEmpty ?? "Nothing")
+                summaryRow("Skips", [viewModel.skipFreeEvents ? "Free events" : nil, viewModel.skipDeclinedEvents ? "declined meetings" : nil, viewModel.skipAllDayEvents ? "all-day events" : nil].compactMap { $0 }.joined(separator: ", ").nonEmpty ?? "Nothing")
                 summaryRow("Runs every", scheduleOptions.first { $0.seconds == viewModel.syncInterval }?.label ?? "\(viewModel.syncInterval / 60) min")
             }
             .padding(.vertical, 4)

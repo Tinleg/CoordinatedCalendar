@@ -150,6 +150,8 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
     public var skipFreeSourceEvents: Bool
     /// Leaves out meetings you declined (used for fan-out).
     public var skipDeclinedSourceEvents: Bool
+    /// Leaves out all-day events, whatever their free/busy status (used for fan-out).
+    public var skipAllDaySourceEvents: Bool
 
     public init(
         sourceCalendarKey: String? = nil,
@@ -163,7 +165,8 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
         skipWhenSourceOriginMatchesDestination: Bool = false,
         reconcileDeletions: Bool = false,
         skipFreeSourceEvents: Bool = false,
-        skipDeclinedSourceEvents: Bool = false
+        skipDeclinedSourceEvents: Bool = false,
+        skipAllDaySourceEvents: Bool = false
     ) {
         self.sourceCalendarKey = sourceCalendarKey
         self.destinationCalendarKey = destinationCalendarKey
@@ -177,6 +180,7 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
         self.reconcileDeletions = reconcileDeletions
         self.skipFreeSourceEvents = skipFreeSourceEvents
         self.skipDeclinedSourceEvents = skipDeclinedSourceEvents
+        self.skipAllDaySourceEvents = skipAllDaySourceEvents
     }
 }
 
@@ -218,6 +222,7 @@ extension BridgeSettings {
         title: String = FreeBusyCompliance.fanOutTitle,
         skipFreeEvents: Bool = true,
         skipDeclinedEvents: Bool = true,
+        skipAllDayEvents: Bool = false,
         startDate: Date,
         endDate: Date,
         dryRun: Bool
@@ -240,7 +245,8 @@ extension BridgeSettings {
             skipWhenSourceOriginMatchesDestination: true,
             reconcileDeletions: true,
             skipFreeSourceEvents: skipFreeEvents,
-            skipDeclinedSourceEvents: skipDeclinedEvents
+            skipDeclinedSourceEvents: skipDeclinedEvents,
+            skipAllDaySourceEvents: skipAllDayEvents
         )
     }
 }
