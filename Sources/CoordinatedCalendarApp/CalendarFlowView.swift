@@ -151,7 +151,7 @@ struct CalendarFlowView: View {
                 get: { viewModel.skipAllDayEvents },
                 set: { viewModel.setSkipAllDayEvents($0) }
             ))
-            .help("All-day events get no busy block, even when marked Busy, so a trip or a holiday doesn't block out whole days. They are still gathered into the consolidated calendar. Blocks already made for them are removed on the next sync.")
+            .help("On by default. All-day events get no busy block, even when marked Busy, so a trip or a holiday doesn't block out whole days. They are still gathered into the consolidated calendar. Blocks already made for them are removed on the next sync.")
         }
     }
 

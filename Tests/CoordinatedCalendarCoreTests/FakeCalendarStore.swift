@@ -107,7 +107,13 @@ final class FakeCalendarStore: CalendarEventStore {
         records[identifier]?.copy()
     }
 
-    func makeEvent() -> any StoredEvent { FakeEvent() }
+    /// Unlike most accounts, a new event here has no free/busy status until one is written, so a test
+    /// cannot pass on the accident of a Busy default.
+    func makeEvent() -> any StoredEvent {
+        let event = FakeEvent()
+        event.availability = .notSupported
+        return event
+    }
 
     func save(_ event: any StoredEvent) throws {
         guard !failWrites else { throw WriteRefused() }

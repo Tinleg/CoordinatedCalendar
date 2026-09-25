@@ -372,7 +372,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
             eventAvailability(
                 for: settings.transform.destinationAvailability,
                 sourceEvent: sourceEvent,
-                destinationCalendar: destinationCalendar
+                destinationCalendar: destinationCalendar,
+                unknownIsBusy: settings.transform.copyAsFreeBusyOnly
             )
         )
         let sourceAvailability = sourceAvailabilityDisplayName(for: sourceEvent)
@@ -1503,7 +1504,8 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         if let availability = eventAvailability(
             for: transform.destinationAvailability,
             sourceEvent: sourceEvent,
-            destinationCalendar: destinationCalendar
+            destinationCalendar: destinationCalendar,
+            unknownIsBusy: transform.copyAsFreeBusyOnly
         ) {
             destinationEvent.availability = availability
         }
@@ -1742,15 +1744,20 @@ public final class CoordinatedCalendarEngine: @unchecked Sendable {
         return lines.joined(separator: "\n")
     }
 
+    /// With `unknownIsBusy`, an event that carries no free/busy status of its own blocks as Busy. Subscribed
+    /// feeds such as TripIt carry none; their busy blocks used to be Busy only because a new event
+    /// defaults to it on most accounts, and was written with no status where it does not.
     private func eventAvailability(
         for availability: DestinationAvailability,
         sourceEvent: any StoredEvent,
-        destinationCalendar: any StoredCalendar
+        destinationCalendar: any StoredCalendar,
+        unknownIsBusy: Bool = false
     ) -> EKEventAvailability? {
         let target: EKEventAvailability?
         switch availability {
         case .preserve:
             target = metadataAvailability(from: sourceEvent) ?? supportedAvailability(sourceEvent.availability)
+                ?? (unknownIsBusy ? .busy : nil)
         case .free:
             target = .free
         case .busy:

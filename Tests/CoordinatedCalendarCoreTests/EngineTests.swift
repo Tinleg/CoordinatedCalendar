@@ -33,18 +33,24 @@ private final class Setup {
 
     /// One full sync, as the app runs it: every contributor into the hub, then the hub out to every recipient.
     @discardableResult
-    func sync(dryRun: Bool = false, keepAlerts: Bool = false, skipAllDay: Bool = false) async -> SyncResult {
+    func sync(
+        dryRun: Bool = false,
+        keepAlerts: Bool = false,
+        skipAllDay: Bool = false,
+        fanOutAvailability: DestinationAvailability = .busy,
+        contributors extra: [FakeCalendar] = []
+    ) async -> SyncResult {
         let start = day - 7 * 24 * hour
         let end = day + 30 * 24 * hour
         var total = SyncResult()
-        for source in [home, work].sorted(by: { $0.key < $1.key }) {
+        for source in ([home, work] + extra).sorted(by: { $0.key < $1.key }) {
             total.add(await engine.run(settings: .fanIn(sourceKey: source.key, consolidatedKey: hub.key,
                                                         copyAlarms: keepAlerts,
                                                         startDate: start, endDate: end, dryRun: dryRun)))
         }
         for destination in [home, work].sorted(by: { $0.key < $1.key }) {
             total.add(await engine.run(settings: .fanOut(consolidatedKey: hub.key, destinationKey: destination.key,
-                                                         availability: .busy, skipAllDayEvents: skipAllDay,
+                                                         availability: fanOutAvailability, skipAllDayEvents: skipAllDay,
                                                          startDate: start, endDate: end, dryRun: dryRun)))
         }
         return total
@@ -427,4 +433,30 @@ private extension SyncResult {
     #expect(setup.busyBlocks(in: setup.home).map(\.startDate) == [day + 2 * hour])
     #expect(setup.copies(in: setup.hub).contains { $0.title == "Work / Calendar: Buffalo trip" })
     #expect(await setup.sync(skipAllDay: true).changes == 0)
+}
+
+@Test func aFeedEventWithNoFreeBusyStatusBlocksAsBusyAndPrivate() async throws {
+    let setup = Setup()
+    // A subscribed, read-only feed like TripIt: its events carry no free/busy status at all.
+    let tripit = setup.store.addCalendar(account: "ETV Inbox", title: "TripIt Feed", writable: false)
+    let flight = setup.store.addEvent(to: tripit, title: "UA1335 ORD to BUF", start: day + 3 * hour, minutes: 120)
+    setup.store.editEvent(flight) { $0.availability = .notSupported }
+    let trip = setup.store.addEvent(to: tripit, title: "Buffalo, NY", start: day, minutes: 6 * 24 * 60)
+    setup.store.editEvent(trip) { $0.isAllDay = true; $0.availability = .notSupported }
+
+    // "Leave As-Is" on every recipient, as configured; all-day events skipped, as by default.
+    let result = await setup.sync(skipAllDay: true, fanOutAvailability: .preserve, contributors: [tripit])
+
+    #expect(result.errors.isEmpty)
+    // Both are gathered, as TripIt sent them.
+    #expect(setup.copies(in: setup.hub).filter { $0.title.hasPrefix("ETV Inbox / TripIt Feed:") }.count == 2)
+    // The flight blocks time as Busy and private; the all-day trip blocks nothing.
+    for calendar in [setup.home, setup.work] {
+        let blocks = setup.busyBlocks(in: calendar)
+        let flightBlock = try #require(blocks.first { $0.startDate == day + 3 * hour })
+        #expect(flightBlock.availability == .busy)
+        #expect(flightBlock.isPrivate)
+        #expect(!blocks.contains { $0.isAllDay })
+    }
+    #expect(await setup.sync(skipAllDay: true, fanOutAvailability: .preserve, contributors: [tripit]).changes == 0)
 }

@@ -222,7 +222,7 @@ extension BridgeSettings {
         title: String = FreeBusyCompliance.fanOutTitle,
         skipFreeEvents: Bool = true,
         skipDeclinedEvents: Bool = true,
-        skipAllDayEvents: Bool = false,
+        skipAllDayEvents: Bool = true,
         startDate: Date,
         endDate: Date,
         dryRun: Bool

@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-- **Skip all-day events on fan-out** (Calendars page, off by default; `--fan-out --skip-all-day`). All-day events marked Busy used to put an all-day busy block in every other calendar, so a family trip or a holiday blocked whole days in your work calendars. With this on, they get no busy block, and blocks already made for them are removed on the next sync. They are still gathered into the consolidated calendar.
+- **Fan-out skips all-day events** (Calendars page, **on** by default; `--fan-out --include-all-day` to block them). All-day events marked Busy used to put a whole-day busy block in every other calendar, so a family trip, a TripIt trip span or a holiday blocked whole days in your work calendars. Now they get no busy block, and blocks already made for them are removed on the next sync. They are still gathered into the consolidated calendar.
+- **An event with no free/busy status blocks as Busy.** Subscribed feeds such as TripIt carry none. Their busy blocks were Busy only because most accounts make a new event Busy by default; they are now written as Busy, and marked private wherever the calendar allows it, like every busy block.
 - `--list-events` also shows each event's end, whether it is all-day, and its free/busy status.
 - Building and releasing work again when the keychain holds two certificates with the same name, which joining the paid Apple Developer Program can cause: signing now picks a certificate by its fingerprint, the one that expires last.
 

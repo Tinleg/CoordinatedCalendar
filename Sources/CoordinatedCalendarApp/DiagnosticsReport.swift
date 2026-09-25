@@ -46,7 +46,7 @@ enum DiagnosticsReport {
             let missing = settings.selectedCalendarKeys.filter { !present.contains($0) }
             lines.append("Settings: \(settings.contributorCalendarKeys.count) fan-in, \(settings.recipientCalendarKeys.count) fan-out, "
                 + "sync every \(settings.effectiveSyncInterval) s, busy title \"\(settings.effectiveFanOutTitle)\", "
-                + "skip free \(settings.skipFreeEvents ?? true ? "yes" : "no"), skip declined \(settings.skipDeclinedEvents ?? true ? "yes" : "no"), skip all-day \(settings.skipAllDayEvents ?? false ? "yes" : "no")")
+                + "skip free \(settings.skipFreeEvents ?? true ? "yes" : "no"), skip declined \(settings.skipDeclinedEvents ?? true ? "yes" : "no"), skip all-day \(settings.skipAllDayEvents ?? true ? "yes" : "no")")
             lines.append("Selected but not currently available: \(missing.isEmpty ? "none" : "\(missing.count)")")
         } else {
             lines.append("Settings: none saved")
