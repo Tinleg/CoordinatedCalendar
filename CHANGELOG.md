@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **A note for TripIt users.** When a TripIt calendar is checked on the Fan-In side, the Calendars page explains that TripIt adds an all-day event spanning each whole trip, and that those trip spans are gathered but don't become busy blocks while fan-out skips all-day events (with a warning instead if that is turned off). Nobody without a TripIt calendar sees it.
+
 - **Fan-out skips all-day events** (Calendars page, **on** by default; `--fan-out --include-all-day` to block them). All-day events marked Busy used to put a whole-day busy block in every other calendar, so a family trip, a TripIt trip span or a holiday blocked whole days in your work calendars. Now they get no busy block, and blocks already made for them are removed on the next sync. They are still gathered into the consolidated calendar.
 - **An event with no free/busy status blocks as Busy.** Subscribed feeds such as TripIt carry none. Their busy blocks were Busy only because most accounts make a new event Busy by default; they are now written as Busy, and marked private wherever the calendar allows it, like every busy block.
 - The quick "nothing changed" check also compares the settings each route actually runs with and the app build, so a changed default or a new build always gets a full sync. Before, a new default could be skipped until the six-hourly full sync.

@@ -52,14 +52,44 @@ struct CalendarFlowView: View {
                 detail: "Events from checked calendars copy into the consolidated calendar with full details. Read-only calendars such as holidays and birthdays can contribute."
             )
             ForEach(viewModel.calendars.filter { $0.stableKey != viewModel.consolidatedCalendarKey }) { calendar in
+                let selected = viewModel.contributorCalendarKeys.contains(calendar.stableKey)
                 calendarRow(
                     calendar,
-                    selected: viewModel.contributorCalendarKeys.contains(calendar.stableKey),
+                    selected: selected,
                     color: Self.fanInColor,
                     anchorID: "in:\(calendar.stableKey)"
                 )
+                if selected, Self.isTripIt(calendar) {
+                    tripItNote
+                }
             }
         }
+    }
+
+    /// TripIt names its calendar feed after itself ("TripIt Feed", "TripIt"), which is all EventKit shows
+    /// of a subscription; the feed's address is not available to apps.
+    static func isTripIt(_ calendar: CalendarIdentity) -> Bool {
+        calendar.calendarTitle.localizedCaseInsensitiveContains("tripit")
+            || calendar.sourceTitle.localizedCaseInsensitiveContains("tripit")
+    }
+
+    /// TripIt puts an all-day event across every trip, which as a busy block would mark whole days as
+    /// taken in every other calendar. Said where the choice is made, so it is not a surprise later.
+    private var tripItNote: some View {
+        let skipping = viewModel.skipAllDayEvents
+        return Label {
+            Text(skipping
+                ? "TripIt adds an all-day event spanning each whole trip, such as \u{201C}Buffalo, NY, September 2026\u{201D}, alongside its flights, car rentals and hotels. Trip spans are gathered into the consolidated calendar but never become busy blocks, because fan-out skips all-day events. Flights and other timed plans block time as Busy."
+                : "TripIt adds an all-day event spanning each whole trip, such as \u{201C}Buffalo, NY, September 2026\u{201D}, alongside its flights, car rentals and hotels. With \u{201C}Skip all-day events\u{201D} off, each trip becomes an all-day busy block for its whole length in every recipient calendar. Turn it on in the Consolidated card so only flights and other timed plans block time.")
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: skipping ? "airplane" : "exclamationmark.triangle")
+        }
+        .font(.caption)
+        .foregroundStyle(skipping ? Color.secondary : Color.orange)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Self.fanInColor.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private var hubColumn: some View {
