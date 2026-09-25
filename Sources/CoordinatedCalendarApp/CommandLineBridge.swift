@@ -275,11 +275,33 @@ enum CommandLineBridge {
             let dryRun = !options.hasFlag("execute")
             var aggregate = SyncResult()
 
+            // Every route this run makes, built once so the signature covers exactly what runs.
+            let reconcile = !options.hasFlag("no-reconcile-deletions")
+            var routes: [(label: String, settings: BridgeSettings)] = []
+            for sourceKey in saved.contributorCalendarKeys.sorted() where sourceKey != consolidatedKey {
+                var settings = saved.fanInSettings(sourceKey: sourceKey, consolidatedKey: consolidatedKey,
+                                                   startDate: startDate, endDate: endDate, dryRun: dryRun)
+                settings.reconcileDeletions = settings.reconcileDeletions && reconcile
+                routes.append(("gui fan-in \(calendarDisplayName(sourceKey, engine: engine)) -> \(calendarDisplayName(consolidatedKey, engine: engine))", settings))
+            }
+            for destinationKey in saved.recipientCalendarKeys.sorted() where destinationKey != consolidatedKey {
+                var settings = saved.fanOutSettings(
+                    consolidatedKey: consolidatedKey,
+                    destinationKey: destinationKey,
+                    availability: saved.recipientAvailabilities?[destinationKey] ?? .busy,
+                    startDate: startDate,
+                    endDate: endDate,
+                    dryRun: dryRun
+                )
+                settings.reconcileDeletions = settings.reconcileDeletions && reconcile
+                routes.append(("gui fan-out \(calendarDisplayName(consolidatedKey, engine: engine)) -> \(calendarDisplayName(destinationKey, engine: engine))", settings))
+            }
+
             // Most runs find nothing to do. Reading each calendar once and comparing it with how things looked
             // when the last full sync started is far cheaper than running every route to find that out.
             // Previews always run in full, and --force skips the check.
-            let signature = syncSignature(saved: saved, consolidatedKey: consolidatedKey, startDate: startDate,
-                                          endDate: endDate, options: options, engine: engine)
+            let signature = syncSignature(saved: saved, consolidatedKey: consolidatedKey, routes: routes.map(\.settings),
+                                          startDate: startDate, endDate: endDate, engine: engine)
             if !dryRun, !options.hasFlag("force"),
                SyncSignatureRecord.canSkip(current: signature.value, recorded: SyncStatusStore.loadSignature()) {
                 var unchanged = SyncResult()
@@ -290,42 +312,9 @@ enum CommandLineBridge {
                 return 0
             }
 
-            for sourceKey in saved.contributorCalendarKeys.sorted() where sourceKey != consolidatedKey {
-                var settings = saved.fanInSettings(
-                    sourceKey: sourceKey,
-                    consolidatedKey: consolidatedKey,
-                    startDate: startDate,
-                    endDate: endDate,
-                    dryRun: dryRun
-                )
-                if options.hasFlag("no-reconcile-deletions") {
-                    settings.reconcileDeletions = false
-                }
-                let result = await engine.run(settings: settings)
-                printSummary(
-                    label: "gui fan-in \(calendarDisplayName(sourceKey, engine: engine)) -> \(calendarDisplayName(consolidatedKey, engine: engine))",
-                    result: result
-                )
-                aggregate.merge(result)
-            }
-
-            for destinationKey in saved.recipientCalendarKeys.sorted() where destinationKey != consolidatedKey {
-                var settings = saved.fanOutSettings(
-                    consolidatedKey: consolidatedKey,
-                    destinationKey: destinationKey,
-                    availability: saved.recipientAvailabilities?[destinationKey] ?? .busy,
-                    startDate: startDate,
-                    endDate: endDate,
-                    dryRun: dryRun
-                )
-                if options.hasFlag("no-reconcile-deletions") {
-                    settings.reconcileDeletions = false
-                }
-                let result = await engine.run(settings: settings)
-                printSummary(
-                    label: "gui fan-out \(calendarDisplayName(consolidatedKey, engine: engine)) -> \(calendarDisplayName(destinationKey, engine: engine))",
-                    result: result
-                )
+            for route in routes {
+                let result = await engine.run(settings: route.settings)
+                printSummary(label: route.label, result: result)
                 aggregate.merge(result)
             }
 
@@ -349,9 +338,9 @@ enum CommandLineBridge {
     private static func syncSignature(
         saved: GUISettings,
         consolidatedKey: String,
+        routes: [BridgeSettings],
         startDate: Date,
         endDate: Date,
-        options: CLIOptions,
         engine: CoordinatedCalendarEngine
     ) -> (value: String, eventCount: Int) {
         let keys = Set([consolidatedKey] + saved.contributorCalendarKeys + saved.recipientCalendarKeys).sorted()
@@ -368,10 +357,16 @@ enum CommandLineBridge {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
         let settings = (try? encoder.encode(saved)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        // The settings each route actually runs with, not just the saved file: a default that changes in
+        // the code changes what runs without changing the file (2026-09-25: "Skip all-day events" turned
+        // on by default, and the next run stopped here instead of removing 90 whole-day blocks). The
+        // build identifies the code itself, so a new build always syncs in full once.
+        let effective = (try? encoder.encode(routes)).map { String(decoding: $0, as: UTF8.self) } ?? ""
         let context = [
             "version:\(UpdateChecker.currentVersion)",
+            "build:\(SyncAgentInstaller.executableIdentity ?? "")",
             "window:\(startDate.timeIntervalSince1970)-\(endDate.timeIntervalSince1970)",
-            "reconcile:\(!options.hasFlag("no-reconcile-deletions"))",
+            "routes:\(effective)",
             "settings:\(settings)",
             "missing:\(missing.joined(separator: ","))"
         ]

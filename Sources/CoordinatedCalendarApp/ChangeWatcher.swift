@@ -80,14 +80,8 @@ enum ChangeWatcher {
         return 75
     }
 
-    /// The executable's file number and modification time, or nil when it is missing.
     private static func executableIdentity() -> String? {
-        guard let path = Bundle.main.executablePath,
-              let attributes = try? FileManager.default.attributesOfItem(atPath: path)
-        else { return nil }
-        let number = attributes[.systemFileNumber].map { "\($0)" } ?? ""
-        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
-        return "\(number)-\(modified)"
+        SyncAgentInstaller.executableIdentity
     }
 
     private static func log(_ message: String) {

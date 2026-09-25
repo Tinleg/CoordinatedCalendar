@@ -160,6 +160,17 @@ enum SyncAgentInstaller {
         return values
     }
 
+    /// This executable's file number and modification time: different for every build that replaces it.
+    /// Nil when the file is missing.
+    static var executableIdentity: String? {
+        guard let path = Bundle.main.executablePath,
+              let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+        else { return nil }
+        let number = attributes[.systemFileNumber].map { "\($0)" } ?? ""
+        let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+        return "\(number)-\(modified)"
+    }
+
     static func isRunning(label: String) -> Bool {
         launchdState(label: label)["state"] == "running"
     }
